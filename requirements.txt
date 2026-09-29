@@ -1,0 +1,11 @@
+# Núcleo. torch y torchvision se instalan aparte, desde el índice de CUDA 12.8:
+#   .\.venv\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+ultralytics==8.3.*
+opencv-python==4.10.*
+numpy==1.26.*
+scipy==1.14.*
+scikit-learn==1.5.*
+pandas==2.2.*
+matplotlib==3.9.*
+tqdm==4.66.*
+pytest==8.3.*
