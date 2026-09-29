@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Los datasets no van al repositorio. Su procedencia está en data/README.md.
+data/raw/
+data/keypoints/
+
+# Pesos de modelos: los de ultralytics se descargan solos, los entrenados son
+# artefactos de una corrida concreta y se citan por su registro, no por el repo.
+*.pt
+*.onnx
+*.engine
+
+# Nada de imágenes de personas en el repositorio. La garantía de privacidad
+# del sistema sería una broma si el repo llevara fotogramas dentro.
+*.mp4
+*.avi
+*.mkv
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+!docs/**/*.jpg
