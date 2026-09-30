@@ -89,8 +89,21 @@ esto de un repo más:
 |---|---|---|
 | Claude | estructura, venv, torch 2.11 + CUDA 12.8, ultralytics 8.3.253 | hecho y verificado en la 3050 |
 | Claude | prueba de humo de YOLO-pose: 4 personas, keypoints `(4,17,3)` | hecho |
+| Claude | formato de esqueletos `src/pose/schema.py` y sus 6 pruebas | hecho, y la mutación tumba la prueba correcta |
+| Claude | extractor `src/pose/extractor.py` | hecho, verificado sobre vídeo real |
 | **Juan Diego** | **descargar UW-IOM** (`data/README.md`) | **pendiente** |
-| Claude | extractor de keypoints y formato `.npz` | pendiente |
+| Claude | adaptador de UW-IOM | bloqueado por la descarga |
+
+**Comprobaciones (pasan hoy):**
+```powershell
+.\.venv\Scripts\python.exe -m tests.test_schema      # 6/6, sin GPU
+.\.venv\Scripts\python.exe -m src.pose.extractor VIDEO --out salida.npz --max-frames 120
+```
+
+Lo medido el 29/09 sobre un vídeo cualquiera de 30 fps, 120 fotogramas, en la
+3050: **77 ms por fotograma** con seguimiento incluido, frente a los 38 ms del
+modelo solo. El seguidor y la lectura del vídeo duplican el coste, lo que apunta
+—otra vez— a que el tiempo no está en la red.
 
 **El formato de keypoints es la decisión de diseño de la fase**, porque todo lo
 demás se construye encima: una secuencia es un array `(T, 17, 3)` —fotogramas ×

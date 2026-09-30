@@ -23,20 +23,37 @@ from src.pose.schema import (  # noqa: E402
 )
 
 
-def _synthetic_body(shoulder, hip, knee) -> tuple[np.ndarray, np.ndarray]:
-    """Un esqueleto de un fotograma con tres articulaciones colocadas a mano.
+def _synthetic_body(shoulder, hip, knee, ankle) -> tuple[np.ndarray, np.ndarray]:
+    """Un esqueleto de un fotograma con cuatro articulaciones colocadas a mano.
 
     Las demás van al centro de la cadera: no participan en el ángulo que se mide
     y ponerlas en cero desplazaría la caja sin motivo.
+
+    El tobillo está aquí por una razón que costó descubrir: sin él, las tres
+    primeras articulaciones daban una caja CUADRADA, y con una caja cuadrada
+    dividir por el ancho y dividir por el alto es la misma operación. La prueba
+    de la normalización pasaba con la normalización rota. Ver
+    `docs/mediciones-falsas.md`, punto 1.
     """
     kp = np.tile(np.asarray(hip, dtype=np.float64), (1, N_JOINTS, 1))
     kp[0, JOINT["left_shoulder"]] = shoulder
     kp[0, JOINT["left_hip"]] = hip
     kp[0, JOINT["right_hip"]] = hip
     kp[0, JOINT["left_knee"]] = knee
+    kp[0, JOINT["left_ankle"]] = ankle
     xs, ys = kp[0, :, 0], kp[0, :, 1]
     box = np.array([[xs.min(), ys.min(), xs.max(), ys.max()]], dtype=np.float64)
     return kp, box
+
+
+def _demand_non_square(box: np.ndarray) -> None:
+    """La condición sin la que las dos pruebas de normalización no prueban nada."""
+    ancho, alto = box[0, 2] - box[0, 0], box[0, 3] - box[0, 1]
+    assert not np.isclose(ancho, alto), (
+        f"el cuerpo de prueba tiene una caja cuadrada ({ancho} x {alto}): con una "
+        "caja cuadrada la normalización anisotrópica coincide con la isotrópica y "
+        "esta prueba pasaría aunque la normalización estuviera rota"
+    )
 
 
 def _normalize_anisotropic(keypoints: np.ndarray, boxes: np.ndarray) -> np.ndarray:
@@ -65,10 +82,12 @@ def test_isotropic_normalization_preserves_angles() -> None:
     ejes separados deforma. Con segmentos paralelos a los ejes el fallo no se
     vería: un ángulo recto sigue siendo recto aunque se estire un solo eje.
     """
-    kp, box = _synthetic_body(shoulder=(1.0, 1.0), hip=(0.0, 0.0), knee=(1.0, 0.0))
+    kp, box = _synthetic_body(
+        shoulder=(1.0, 1.0), hip=(0.0, 0.0), knee=(1.0, 0.0), ankle=(0.0, -2.0)
+    )
     antes = joint_angle(kp, "left_shoulder", "left_hip", "left_knee")
     assert np.isclose(antes[0], 45.0), f"el cuerpo de prueba no mide 45 grados: {antes[0]}"
-    assert not np.isclose(box[0, 2] - box[0, 0], box[0, 3] - box[0, 1]) or True
+    _demand_non_square(box)
 
     despues = joint_angle(normalize_isotropic(kp, box), "left_shoulder", "left_hip", "left_knee")
     assert np.isclose(antes[0], despues[0], atol=1e-4), (
@@ -82,9 +101,10 @@ def test_anisotropic_normalization_breaks_angles() -> None:
     Sin esta prueba, la de arriba pasaría también con una normalización rota que
     no tocara este caso concreto, y no sabríamos si protege algo.
     """
-    kp, _ = _synthetic_body(shoulder=(1.0, 1.0), hip=(0.0, 0.0), knee=(1.0, 0.0))
-    # Caja deliberadamente alargada: 1 de ancho por 3 de alto.
-    box = np.array([[0.0, -2.0, 1.0, 1.0]])
+    kp, box = _synthetic_body(
+        shoulder=(1.0, 1.0), hip=(0.0, 0.0), knee=(1.0, 0.0), ankle=(0.0, -2.0)
+    )
+    _demand_non_square(box)
     antes = joint_angle(kp, "left_shoulder", "left_hip", "left_knee")
     despues = joint_angle(
         _normalize_anisotropic(kp, box), "left_shoulder", "left_hip", "left_knee"

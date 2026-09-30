@@ -1,6 +1,10 @@
 # Núcleo. torch y torchvision se instalan aparte, desde el índice de CUDA 12.8:
 #   .\.venv\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ultralytics==8.3.*
+# El seguidor de ultralytics importa `lap` y no lo trae como dependencia: sin esto
+# `model.track` revienta con ModuleNotFoundError en la primera llamada, no al
+# importar. `lapx` es la distribución que compila en Windows.
+lapx==0.5.*
 opencv-python==4.10.*
 numpy==1.26.*
 scipy==1.14.*
