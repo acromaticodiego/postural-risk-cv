@@ -19,6 +19,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.baseline.reba import (  # noqa: E402
+    body_angles,
     TABLE_A,
     TABLE_B,
     TABLE_C,
@@ -140,12 +141,59 @@ def _bent_over() -> np.ndarray:
     return kp
 
 
-def test_neutral_posture_is_low_risk() -> None:
+def test_neutral_posture_scores_every_component_as_the_norm_says() -> None:
+    """Componente a componente, no solo el total.
+
+    La primera versión de esta prueba solo miraba que el REBA agregado saliera
+    bajo, y pasaba con la flexión de rodilla y de codo invertidas: una pierna recta
+    daba 180° de flexión y puntuaba 3, pero el total se quedaba en 2 y la prueba lo
+    dejaba pasar. Ver `docs/mediciones-falsas.md`, punto 3. El agregado tolera un
+    componente roto; el desglose no.
+    """
     r = reba_from_keypoints(_standing_neutral())
-    assert r["trunk"][0] == 1, f"tronco erguido debería puntuar 1, dio {r['trunk'][0]}"
-    assert action_level(int(r["reba"][0])) in ("despreciable", "bajo"), (
-        f"de pie y neutro dio REBA {r['reba'][0]} ({action_level(int(r['reba'][0]))})"
+    angles = body_angles(_standing_neutral())
+    assert abs(angles["knee_flexion"][0]) < 5, (
+        f"una pierna recta no puede tener {angles['knee_flexion'][0]:.0f}° de flexión"
     )
+    assert abs(angles["lower_arm_flexion"][0]) < 5, (
+        f"un codo extendido no puede tener {angles['lower_arm_flexion'][0]:.0f}° de flexión"
+    )
+    assert int(r["trunk"][0]) == 1, f"tronco erguido: {r['trunk'][0]}"
+    assert int(r["neck"][0]) == 1, f"cuello recto: {r['neck'][0]}"
+    assert int(r["legs"][0]) == 1, f"piernas rectas con apoyo bilateral: {r['legs'][0]}"
+    assert int(r["upper_arm"][0]) == 1, f"brazo pegado al cuerpo: {r['upper_arm'][0]}"
+    # El antebrazo SÍ puntúa 2 aquí, y es correcto: la norma considera óptimo el
+    # codo entre 60° y 100°, así que un brazo colgando extendido penaliza.
+    assert int(r["lower_arm"][0]) == 2, f"codo extendido: {r['lower_arm'][0]}"
+    assert action_level(int(r["reba"][0])) in ("despreciable", "bajo")
+
+
+def test_bent_elbow_scores_better_than_extended_one() -> None:
+    """El codo en escuadra es lo óptimo para la norma, y el extendido penaliza.
+
+    Comprueba el ángulo del codo en el otro sentido: si estuviera invertido, esta
+    prueba y la de arriba no podrían pasar las dos.
+    """
+    kp = _standing_neutral().copy()
+    kp[0, JOINT["right_elbow"]] = (105, 260)
+    kp[0, JOINT["right_wrist"]] = (165, 260)  # antebrazo horizontal: codo a 90°
+    angles = body_angles(kp)
+    assert 80 < angles["lower_arm_flexion"][0] < 100, (
+        f"un codo en escuadra debería medir ~90°, midió {angles['lower_arm_flexion'][0]:.0f}°"
+    )
+    assert int(reba_from_keypoints(kp)["lower_arm"][0]) == 1
+
+
+def test_bent_knee_is_detected() -> None:
+    """Y la rodilla en el otro sentido, por el mismo motivo."""
+    kp = _standing_neutral().copy()
+    kp[0, JOINT["right_knee"]] = (105, 400)
+    kp[0, JOINT["right_ankle"]] = (165, 400)  # pantorrilla horizontal: rodilla a 90°
+    angles = body_angles(kp)
+    assert 80 < angles["knee_flexion"][0] < 100, (
+        f"una rodilla en escuadra debería medir ~90°, midió {angles['knee_flexion'][0]:.0f}°"
+    )
+    assert int(reba_from_keypoints(kp)["legs"][0]) == 3  # 1 bilateral + 2 por >60°
 
 
 def test_bent_posture_scores_higher_than_neutral() -> None:

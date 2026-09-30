@@ -89,6 +89,50 @@ fallo del instrumento.
 
 ---
 
+## 3. La mitad del turno salía «en riesgo», y era un ángulo invertido (2026-09-29)
+
+**Qué se creía.** Que el REBA geométrico funcionaba: 12 pruebas en verde, las tres
+tablas de la norma comprobadas celda a celda y monótonas en todos sus ejes, los
+umbrales verificados en sus fronteras. El primer número real sobre el sujeto 1 fue
+**86,6 segundos de riesgo sobre 173 medidos —el 50% del turno— y 29 eventos**.
+Alto, pero la tarea consiste en manipular cajas a distintas alturas, así que
+colaba.
+
+**Qué pasaba.** La flexión de rodilla y la de codo estaban calculadas como
+`180 - ángulo(segmento1, segmento2)`. Con los vectores que usa el módulo —cadera→
+rodilla y rodilla→tobillo, los dos en el mismo sentido de recorrido— una pierna
+**recta** da 0 grados entre ellos, no 180. Así que la fórmula devolvía 180 grados
+de flexión para una pierna estirada, y las piernas puntuaban 3 sobre 4 **todo el
+rato**. El `180 -` es lo que uno escribe pensando en el ángulo interior de la
+articulación, que es una imagen mental correcta y una implementación equivocada.
+
+Corregido: **28,5 segundos de riesgo (16%) y 13 eventos**, y la causa dominante
+pasó de `legs` a `trunk`, que es lo que tiene sentido en una tarea de recoger cajas
+del suelo.
+
+**Por qué las pruebas no lo cazaron.** `test_neutral_posture_is_low_risk` ponía una
+persona de pie perfectamente recta y comprobaba que **el REBA agregado** saliera
+«despreciable o bajo». Con el bug, esa postura daba piernas 3 y antebrazo 2… y un
+REBA total de **2**, que es «bajo». La prueba pasaba. **El agregado tolera un
+componente roto: por eso hay que comprobar el desglose.** Ahora se exige tronco 1,
+cuello 1, piernas 1 y brazo 1 uno por uno, más dos pruebas que doblan el codo y la
+rodilla a 90 grados para comprobar el ángulo en el otro sentido — con el ángulo
+invertido, esas dos y la neutra no pueden pasar a la vez.
+
+**Cómo se destapó, y es lo que hay que recordar.** No lo encontró ninguna prueba:
+lo encontró **dibujar el esqueleto**. En el primer fotograma renderizado el panel
+decía «Rodilla 161 grados» junto a un monigote con las piernas rectas, y eso es
+imposible de no ver. Doce pruebas deterministas miraron el número y no lo vieron;
+una imagen lo delató en dos segundos.
+
+La visualización se había planificado como el entregable de presentación —el vídeo
+para enseñar el proyecto— y resultó ser **un instrumento de depuración**. Un
+número equivocado es plausible mientras sea un número; dibujado sobre un cuerpo,
+deja de serlo. Conviene construir la vista antes de fiarse de las cifras, no
+después.
+
+---
+
 ## Sustos que se comprobaron y NO eran falsos
 
 No todo lo sospechoso está mal, y anotar las falsas alarmas evita desconfiar de

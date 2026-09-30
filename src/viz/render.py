@@ -121,7 +121,7 @@ def _draw_panel(lienzo, datos, indice, config, acumulado, hz) -> None:
     color = COLOR_NIVEL[nivel]
 
     _draw_text(lienzo, config.name.upper(), (x0 + 28, 46), 0.52, SUAVE)
-    _draw_text(lienzo, "RIESGO POSTURAL  ·  REBA", (x0 + 28, 72), 0.42, SUAVE)
+    _draw_text(lienzo, "RIESGO POSTURAL - REBA", (x0 + 28, 72), 0.42, SUAVE)
 
     # El puntaje, grande, con su nivel. Es lo primero que se mira.
     cv2.rectangle(lienzo, (x0 + 28, 92), (x0 + 392, 188), color, 2, cv2.LINE_AA)
@@ -138,7 +138,7 @@ def _draw_panel(lienzo, datos, indice, config, acumulado, hz) -> None:
         grados = float(datos[clave][indice])
         puntaje = int(datos[componente][indice])
         _draw_text(lienzo, etiqueta, (x0 + 28, y + 12), 0.46, TEXTO)
-        _draw_text(lienzo, f"{grados:5.0f}°", (x0 + 148, y + 12), 0.46, SUAVE)
+        _draw_text(lienzo, f"{grados:5.0f} g", (x0 + 148, y + 12), 0.46, SUAVE)
         # Barra proporcional al puntaje del componente, sobre su máximo de la norma.
         maximo = 4 if componente in ("trunk", "upper_arm", "legs") else 2
         ancho = int(150 * min(puntaje / maximo, 1.0))

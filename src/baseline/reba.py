@@ -258,8 +258,15 @@ def body_angles(keypoints: np.ndarray) -> dict[str, np.ndarray]:
         "trunk_flexion": _angle_between(trunk_vec, arriba),
         "neck_flexion": _angle_between(neck_vec, trunk_vec),
         "upper_arm_elevation": _angle_between(upper_arm_vec, -trunk_vec),
-        "lower_arm_flexion": 180.0 - _angle_between(upper_arm_vec, forearm_vec),
-        "knee_flexion": 180.0 - _angle_between(thigh_vec, shin_vec),
+        # OJO, y aquí hubo un error que solo se vio al dibujar el esqueleto: la
+        # flexión es DIRECTAMENTE el ángulo entre los dos segmentos, sin restar de
+        # 180. Los vectores van hombro→codo y codo→muñeca, los dos en el mismo
+        # sentido de recorrido, así que un miembro EXTENDIDO da 0 grados entre
+        # ellos y uno doblado en escuadra da 90. Restarlo de 180 —que es lo que uno
+        # escribe pensando en el ángulo interior de la articulación— hacía que una
+        # pierna recta puntuara como flexión máxima.
+        "lower_arm_flexion": _angle_between(upper_arm_vec, forearm_vec),
+        "knee_flexion": _angle_between(thigh_vec, shin_vec),
     }
 
 
