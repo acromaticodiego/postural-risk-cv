@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
+from ..baseline.niosh import analyze_lift
 from ..baseline.reba import action_level, reba_from_keypoints
 from ..eval.harness import HZ
 from .report import build_report
@@ -37,6 +38,8 @@ DEMO_WORKSTATIONS = (
         name="Linea 3 - surtido de cajas",
         load_kg=12.0,
         coupling="fair",
+        worker_height_cm=172.0,
+        lifts_per_min=4.0,
     ),
     # 18 kg con agarre malo, pero SIN carga brusca. Con `sudden_load=True` este
     # puesto salía con el 100% del tiempo en riesgo, y no por un fallo: medido, una
@@ -49,12 +52,16 @@ DEMO_WORKSTATIONS = (
         name="Almacen 1 - estanteria baja",
         load_kg=18.0,
         coupling="poor",
+        worker_height_cm=168.0,
+        lifts_per_min=6.0,
     ),
     WorkstationConfig(
         id="EMPAQUE-2",
         name="Empaque 2 - mesa de armado",
         load_kg=4.0,
         coupling="good",
+        worker_height_cm=165.0,
+        lifts_per_min=2.0,
     ),
     # A propósito sin configurar: enseña en pantalla qué pasa cuando el cliente aún
     # no ha declarado el peso, y que entonces el informe se marca como cota inferior.
@@ -80,6 +87,19 @@ class EventReplay:
     que saber nada de la resolución de la cámara original."""
     reba: list
     components: list
+    niosh: dict | None = None
+    """El análisis NIOSH, solo si el evento es un LEVANTAMIENTO. La ecuación mide
+    levantar una carga, no estar de pie en mala postura: aplicarla a un evento de
+    alcance o de sostener daría un índice sin significado."""
+
+
+# Un evento es un levantamiento si su tarea dominante lo dice. La ecuación NIOSH no
+# se aplica a cualquier postura de riesgo.
+LIFTING_TASKS = ("pick-up", "place")
+
+
+def _is_lift(task: str) -> bool:
+    return any(t in task for t in LIFTING_TASKS)
 
 
 def _normalize_for_canvas(keypoints: np.ndarray) -> np.ndarray:
@@ -117,11 +137,42 @@ def process_shift(
     resumen = summarize_exposure(scores, HZ, config)
     informe = build_report(tareas, scores, HZ, config)
 
+    # La frecuencia se DECLARA, no se mide, y esto costó un número inflado antes de
+    # entenderlo. NIOSH supone que la frecuencia se sostiene durante horas; contarla
+    # sobre tres minutos de grabación en los que alguien levanta sin parar da una
+    # frecuencia de experimento que hunde el peso recomendado, y entonces el factor
+    # que más penaliza sale siempre «frecuencia» y tapa lo que de verdad pasa. La
+    # medida se conserva al lado para poder compararla con lo declarado.
+    levantamientos = sum(
+        1
+        for e in resumen.events
+        if _is_lift(str(np.unique(tareas[e.start_frame : e.end_frame + 1])[0]))
+    )
+    medida = max(levantamientos / max(resumen.measured_seconds / 60, 1e-9), 0.2)
+    por_minuto = config.lifts_per_min if config.lifts_per_min else medida
+    frecuencia_estimada = config.lifts_per_min is None
+
     replays = []
     for n, evento in enumerate(resumen.events):
         corte = slice(evento.start_frame, evento.end_frame + 1)
         tramo = keypoints[corte]
         valores, cuentas = np.unique(tareas[corte], return_counts=True)
+        tarea = str(valores[cuentas.argmax()])
+
+        analisis = None
+        if _is_lift(tarea) and len(tramo) >= 2:
+            analisis = asdict(
+                analyze_lift(
+                    tramo,
+                    HZ,
+                    worker_height_cm=config.worker_height_cm,
+                    load_kg=config.load_kg,
+                    coupling=config.coupling,
+                    asymmetry_deg=45.0 if config.task_requires_twist else 0.0,
+                    lifts_per_min=por_minuto,
+                )
+            ) | {"frequency_estimated": frecuencia_estimada, "frequency_measured": round(medida, 1)}
+
         replays.append(
             EventReplay(
                 id=f"{config.id}-{subject_data.index:02d}-{n:03d}",
@@ -132,13 +183,14 @@ def process_shift(
                 peak_reba=evento.peak_reba,
                 peak_level=evento.peak_level,
                 dominant_component=evento.dominant_component,
-                task=str(valores[cuentas.argmax()]),
+                task=tarea,
                 keypoints=np.round(_normalize_for_canvas(tramo), 4).tolist(),
                 reba=[int(v) for v in scores["reba"][corte]],
                 components=[
                     {c: int(scores[c][i]) for c in ("trunk", "neck", "legs", "upper_arm", "lower_arm")}
                     for i in range(evento.start_frame, evento.end_frame + 1)
                 ],
+                niosh=analisis,
             )
         )
 
@@ -154,6 +206,15 @@ def process_shift(
         "tareas_por_fotograma": tareas,
         "scores": scores,
     }
+
+
+def _worst_lift(eventos: list[dict]) -> dict | None:
+    """El levantamiento con peor índice. Es lo que resume el puesto en kilos."""
+    con_niosh = [e for e in eventos if e.get("niosh") and e["niosh"].get("lifting_index")]
+    if not con_niosh:
+        return None
+    peor = max(con_niosh, key=lambda e: e["niosh"]["lifting_index"])
+    return {"event_id": peor["id"], "task": peor["task"], **peor["niosh"]}
 
 
 def build_workstation(config: WorkstationConfig, shifts: list[dict]) -> dict:
@@ -175,6 +236,13 @@ def build_workstation(config: WorkstationConfig, shifts: list[dict]) -> dict:
     eventos = [e for turno in shifts for e in turno["events"]]
     eventos.sort(key=lambda e: (-e["peak_reba"], -e["duration_seconds"]))
     total_eventos = len(eventos)
+
+    # El peor levantamiento se busca entre TODOS los eventos, ANTES de recortar. Los
+    # doce que conservan replay están elegidos por REBA, y el levantamiento más grave
+    # según NIOSH no tiene por qué estar entre ellos: son dos normas que miden cosas
+    # distintas, que es justo el motivo de tener las dos. Buscarlo después del
+    # recorte dejaba sin índice a puestos que sí tenían peso declarado.
+    peor_levantamiento = _worst_lift(eventos)
     eventos = eventos[:MAX_REPLAYS]
 
     return {
@@ -196,6 +264,7 @@ def build_workstation(config: WorkstationConfig, shifts: list[dict]) -> dict:
         "is_lower_bound": informe.is_lower_bound,
         "events": eventos,
         "total_events": total_eventos,
+        "worst_lift": peor_levantamiento,
         "level_of": {
             str(v): action_level(int(v)) for v in np.unique(scores["reba"]) if int(v) > 0
         },

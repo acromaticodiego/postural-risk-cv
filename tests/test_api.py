@@ -28,6 +28,7 @@ CAMPOS_RAIZ = ("generado", "hz", "puestos")
 CAMPOS_PUESTO = (
     "id", "name", "configured", "config", "shifts", "seconds", "seconds_at_risk",
     "seconds_by_level", "tasks", "recommendation", "events", "total_events",
+    "worst_lift",
 )
 CAMPOS_CONFIG = ("load_kg", "coupling", "risk_threshold")
 CAMPOS_TAREA = (
@@ -36,9 +37,15 @@ CAMPOS_TAREA = (
 )
 CAMPOS_EVENTO = (
     "id", "shift", "start_seconds", "duration_seconds", "peak_reba", "peak_level",
-    "dominant_component", "task", "keypoints", "reba", "components",
+    "dominant_component", "task", "keypoints", "reba", "components", "niosh",
 )
 COMPONENTES = ("trunk", "neck", "legs", "upper_arm", "lower_arm")
+# Lo que la tarjeta NIOSH del panel lee de cada análisis de levantamiento.
+CAMPOS_NIOSH = (
+    "horizontal_cm", "vertical_cm", "travel_cm", "frequency_per_min", "multipliers",
+    "recommended_weight_kg", "lifting_index", "scale_estimated", "frequency_estimated",
+)
+MULTIPLICADORES = ("horizontal", "vertical", "recorrido", "asimetria", "frecuencia", "agarre")
 
 
 def _cliente():
@@ -91,6 +98,52 @@ def test_json_has_every_field_the_page_reads() -> None:
                     fallos.append(f"componentes del evento: falta {componente}")
             break
     assert not fallos, "el JSON no cumple lo que la pagina lee: " + "; ".join(fallos[:6])
+
+
+def test_niosh_analysis_is_complete_where_it_exists() -> None:
+    """La tarjeta NIOSH lee muchos campos y ninguno da error si falta: dibuja
+    `undefined` en una recomendación que habla de kilos."""
+    datos = _cliente().get("/api/panel").json()
+    fallos, analizados = [], 0
+    for puesto in datos["puestos"]:
+        candidatos = [e["niosh"] for e in puesto["events"] if e.get("niosh")]
+        if puesto.get("worst_lift"):
+            candidatos.append(puesto["worst_lift"])
+        for analisis in candidatos:
+            analizados += 1
+            for campo in CAMPOS_NIOSH:
+                if campo not in analisis:
+                    fallos.append(f"{puesto['id']}: falta niosh.{campo}")
+            for m in MULTIPLICADORES:
+                if m not in analisis.get("multipliers", {}):
+                    fallos.append(f"{puesto['id']}: falta el multiplicador {m}")
+    assert analizados, "ningun puesto trajo analisis NIOSH: la tarjeta no se veria nunca"
+    assert not fallos, "; ".join(fallos[:5])
+
+
+def test_niosh_only_applies_to_lifts() -> None:
+    """La ecuación mide levantar una carga. Aplicarla a estar de pie en mala postura
+    daría un índice sin significado, y el panel lo mostraría igual de creíble."""
+    datos = _cliente().get("/api/panel").json()
+    for puesto in datos["puestos"]:
+        for evento in puesto["events"]:
+            if evento.get("niosh"):
+                assert "pick-up" in evento["task"] or "place" in evento["task"], (
+                    f"evento {evento['id']} tiene NIOSH y su tarea es {evento['task']!r}"
+                )
+
+
+def test_recommended_weight_is_never_a_free_pass() -> None:
+    """El peso recomendado no puede superar la constante de la norma (23 kg).
+
+    Es la cota que impide que un error de escala —una estatura mal declarada, por
+    ejemplo— produzca un 'puedes levantar 60 kg' con toda naturalidad.
+    """
+    datos = _cliente().get("/api/panel").json()
+    for puesto in datos["puestos"]:
+        peor = puesto.get("worst_lift")
+        if peor:
+            assert 0 <= peor["recommended_weight_kg"] <= 23.0, peor["recommended_weight_kg"]
 
 
 def test_replay_arrays_line_up() -> None:

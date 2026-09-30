@@ -51,6 +51,20 @@ class WorkstationConfig:
     sudden_load: bool = False
     risk_threshold: int = DEFAULT_RISK_THRESHOLD
     min_event_seconds: float = DEFAULT_MIN_EVENT_SECONDS
+    worker_height_cm: float | None = None
+    """Estatura del trabajador, para convertir píxeles en centímetros y poder
+    aplicar la ecuación NIOSH. El cuerpo hace de regla, que es lo que hace un
+    evaluador midiendo sobre una foto. Sin declararla se asume una media y el
+    resultado se marca como estimado."""
+
+    lifts_per_min: float | None = None
+    """Levantamientos por minuto SOSTENIDOS en el puesto. Se declara y no se mide,
+    y esto costó un número inflado antes de entenderlo: NIOSH supone que la
+    frecuencia se mantiene durante horas, así que contarla sobre tres minutos de
+    grabación —donde alguien levanta sin parar porque le están grabando— da una
+    frecuencia de experimento y hunde el peso recomendado. Un jefe de planta sabe
+    cuántas cajas por hora salen de su línea; la cámara solo sabe lo que vio en la
+    muestra. Sin declarar, se usa la medida y el informe lo marca como estimada."""
 
     def __post_init__(self) -> None:
         if self.coupling is not None and self.coupling not in COUPLING_SCORES:

@@ -114,6 +114,17 @@ input[type=range]{flex:1;accent-color:var(--acento)}
 .sello.efimero{color:var(--n3);border:1px solid rgba(232,178,58,.4)}
 .sello.guardado{color:var(--n1);border:1px solid rgba(125,191,110,.4)}
 
+.niosh{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+  padding:18px 20px;margin:18px 0}
+.niosh h3{font-size:12px;letter-spacing:.8px;text-transform:uppercase;
+  color:var(--tenue);margin-bottom:14px}
+.niosh .kilos{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+.niosh .kilos b{font-size:30px;font-weight:600}
+.factores{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.factor{font-size:11px;border:1px solid var(--borde);border-radius:6px;padding:4px 10px;
+  color:var(--suave)}
+.factor.malo{color:var(--n4);border-color:rgba(232,118,58,.4)}
+
 .tira{display:grid;grid-template-columns:auto 1fr;gap:26px;align-items:center;
   background:var(--panel);border:1px solid var(--borde);border-radius:10px;
   padding:18px 22px;margin-top:16px}
@@ -223,6 +234,8 @@ function vistaPuesto(p){
       `<h3>Recomendación</h3>${p.recommendation}`})
   );
 
+  if (p.worst_lift) v.append(tarjetaNiosh(p.worst_lift, p.config.load_kg));
+
   v.append(el("div",{className:"titulo",innerHTML:"<h2>Riesgo por tarea</h2>"}),
            el("div",{className:"sub",textContent:
              "La que más daño acumula no siempre es la más severa: manda el tiempo."}));
@@ -265,6 +278,51 @@ function vistaPuesto(p){
   }
 }
 
+function tarjetaNiosh(n, pesoReal){
+  const caja = el("div",{className:"niosh"});
+  const indice = n.lifting_index;
+  const c = indice == null ? css("--suave")
+          : indice <= 1 ? css("--n1") : indice <= 2 ? css("--n3")
+          : indice <= 3 ? css("--n4") : css("--n5");
+  const veredicto = indice == null ? "sin peso declarado"
+          : indice <= 1 ? "dentro de lo recomendado" : indice <= 2 ? "por encima de lo recomendado"
+          : indice <= 3 ? "riesgo alto" : "riesgo muy alto";
+
+  caja.append(el("h3",{textContent:"Levantamiento · ecuación NIOSH"}));
+  caja.append(el("div",{className:"kilos",innerHTML:
+    `<b style="color:${c}">${n.recommended_weight_kg} kg</b>
+     <span class="sub" style="margin:0">es el peso que sería aceptable levantar así` +
+     (pesoReal ? `, y la carga declarada pesa <b style="font-size:14px">${pesoReal} kg</b>` : "") +
+     `</span>`}));
+  if (indice != null) caja.append(el("div",{style:`color:${c};font-size:13px`,
+    textContent:`índice ${indice} · ${veredicto}`}));
+
+  const medidas = el("div",{className:"sub",style:"margin:12px 0 0",textContent:
+    `carga a ${n.horizontal_cm} cm del cuerpo · a ${n.vertical_cm} cm del suelo · ` +
+    `sube ${n.travel_cm} cm · ${n.frequency_per_min} levantamientos/min`});
+  caja.append(medidas);
+
+  const factores = el("div",{className:"factores"});
+  const NOMBRES = {horizontal:"distancia al cuerpo", vertical:"altura de inicio",
+                   recorrido:"recorrido vertical", asimetria:"torsión",
+                   frecuencia:"frecuencia", agarre:"agarre"};
+  const peor = Object.keys(n.multipliers).reduce((a,b) =>
+    n.multipliers[a] < n.multipliers[b] ? a : b);
+  for (const [clave, valor] of Object.entries(n.multipliers)){
+    factores.append(el("span",{className:"factor" + (clave === peor ? " malo" : ""),
+      textContent:`${NOMBRES[clave] || clave} ×${valor.toFixed(2)}`}));
+  }
+  caja.append(factores);
+  caja.append(el("div",{className:"sub",style:"margin:12px 0 0",textContent:
+    `El factor que más penaliza es «${NOMBRES[peor]}». ` +
+    (peor === "horizontal"
+      ? "Acercar la carga al cuerpo es la intervención con más efecto."
+      : "Es donde más margen hay para mejorar.") +
+    (n.scale_estimated ? " Estatura del trabajador no declarada: medidas estimadas." : "") +
+    (n.frequency_estimated ? " Frecuencia estimada de la grabación, no declarada." : "")}));
+  return caja;
+}
+
 // --- pantalla 3: el replay en esqueleto ------------------------------------
 function vistaEvento(p, e){
   const v = document.getElementById("vista");
@@ -297,6 +355,8 @@ function vistaEvento(p, e){
   v.append(el("div",{className:"sub",style:"margin-top:16px",textContent:
     "Esto es todo lo que el sistema conserva del incidente: la posición de las " +
     "articulaciones. No existe ninguna imagen que mostrar."}));
+
+  if (e.niosh) v.append(tarjetaNiosh(e.niosh, p.config.load_kg));
 
   const ctx = lienzo.getContext("2d");
   let i = 0, corriendo = true;
