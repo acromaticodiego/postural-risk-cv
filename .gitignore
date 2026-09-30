@@ -23,3 +23,6 @@ data/keypoints/
 *.png
 !docs/**/*.png
 !docs/**/*.jpg
+
+# La demo del panel: datos generados, no van al repositorio.
+artifacts/demo/

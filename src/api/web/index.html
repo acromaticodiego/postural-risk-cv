@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Riesgo postural · Panel de planta</title>
+<style>
+/* Todo el estilo va aquí, sin CDN. Una librería externa puede tardar o fallar y
+   dejar la página sin estilos justo en la toma del vídeo. */
+:root{
+  --fondo:#0f1214; --panel:#171b1f; --panel2:#1d2226; --borde:#2a3036;
+  --texto:#e8eaec; --suave:#8d979f; --tenue:#5d666d;
+  --n1:#7dbf6e; --n2:#8fd18a; --n3:#e8b23a; --n4:#e8763a; --n5:#e34b4b;
+  --acento:#5aa9e6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--fondo);color:var(--texto);
+  font:14px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:.2px}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+
+header{display:flex;align-items:center;gap:18px;padding:18px 28px;
+  border-bottom:1px solid var(--borde);background:var(--panel)}
+.marca{font-size:15px;font-weight:600}
+.marca span{color:var(--acento)}
+.privacidad{margin-left:auto;font-size:12px;color:var(--suave);
+  border:1px solid var(--borde);border-radius:999px;padding:5px 14px}
+.privacidad b{color:var(--n1);font-weight:600}
+
+main{max-width:1180px;margin:0 auto;padding:28px}
+.migas{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--suave);
+  margin-bottom:20px;min-height:20px}
+.migas button{color:var(--acento)}
+.migas button:hover{text-decoration:underline}
+
+.titulo{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+.titulo h2{font-size:20px}
+.sub{color:var(--suave);font-size:13px;margin-bottom:22px}
+
+.rejilla{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+.tarjeta{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+  padding:18px;text-align:left;width:100%;transition:border-color .15s,transform .15s}
+.tarjeta:hover{border-color:var(--acento);transform:translateY(-2px)}
+.tarjeta h3{font-size:15px;margin-bottom:2px}
+.tarjeta .id{font-size:11px;color:var(--tenue);letter-spacing:1px;margin-bottom:14px}
+.cifra{font-size:30px;font-weight:600;line-height:1}
+.cifra small{font-size:13px;font-weight:400;color:var(--suave);margin-left:6px}
+.pie{font-size:12px;color:var(--suave);margin-top:12px}
+
+.barra{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-top:14px;
+  background:var(--panel2)}
+.barra i{display:block}
+
+.aviso{display:inline-block;margin-top:12px;font-size:11px;color:var(--n3);
+  border:1px solid rgba(232,178,58,.35);border-radius:6px;padding:3px 9px}
+
+table{width:100%;border-collapse:collapse;margin-top:6px}
+th{text-align:left;font-size:11px;letter-spacing:.8px;color:var(--tenue);
+  text-transform:uppercase;padding:0 12px 10px 0;font-weight:600}
+td{padding:11px 12px 11px 0;border-top:1px solid var(--borde);font-size:13px}
+td.num,th.num{text-align:right}
+.tarea{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12.5px}
+.medidor{display:inline-block;width:110px;height:6px;background:var(--panel2);
+  border-radius:3px;overflow:hidden;vertical-align:middle;margin-right:9px}
+.medidor i{display:block;height:100%}
+
+.recomendacion{background:var(--panel);border:1px solid var(--borde);
+  border-left:3px solid var(--acento);border-radius:8px;padding:16px 18px;margin:22px 0}
+.recomendacion h3{font-size:12px;color:var(--tenue);letter-spacing:.8px;
+  text-transform:uppercase;margin-bottom:8px}
+
+.evento{display:flex;align-items:center;gap:14px;padding:12px;border-radius:8px;
+  border:1px solid var(--borde);background:var(--panel);margin-bottom:8px;width:100%;
+  text-align:left}
+.evento:hover{border-color:var(--acento)}
+.punto{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;
+  font-weight:600;font-size:15px;flex:none;color:#0f1214}
+.evento .meta{font-size:12px;color:var(--suave)}
+
+.escena{display:grid;grid-template-columns:1fr 300px;gap:20px;
+  background:var(--panel);border:1px solid var(--borde);border-radius:10px;padding:20px}
+canvas{width:100%;height:auto;background:var(--fondo);border-radius:8px;
+  border:1px solid var(--borde);display:block}
+.controles{display:flex;align-items:center;gap:14px;margin-top:14px;font-size:13px;
+  color:var(--suave)}
+.controles button{border:1px solid var(--borde);border-radius:6px;padding:6px 16px;
+  background:var(--panel2)}
+.controles button:hover{border-color:var(--acento)}
+input[type=range]{flex:1;accent-color:var(--acento)}
+
+.comp{display:flex;align-items:center;gap:10px;margin-bottom:9px;font-size:12.5px}
+.comp span:first-child{width:78px;color:var(--suave)}
+.comp .medidor{width:100%;flex:1;margin:0}
+.grande{font-size:44px;font-weight:600;line-height:1}
+.nivel{font-size:13px;letter-spacing:1px;text-transform:uppercase}
+.vacio{color:var(--suave);padding:40px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <div class="marca">Riesgo postural <span>por visión</span></div>
+  <div class="privacidad">Reconstruido de articulaciones · <b>no se guarda ninguna imagen</b></div>
+</header>
+
+<main>
+  <div class="migas" id="migas"></div>
+  <div id="vista"><div class="vacio">Cargando…</div></div>
+</main>
+
+<script>
+const HUESOS = [[5,6],[11,12],[5,11],[6,12],[5,7],[7,9],[6,8],[8,10],
+                [11,13],[13,15],[12,14],[14,16],[0,5],[0,6]];
+const COLOR = {"despreciable":"--n1","bajo":"--n2","medio":"--n3","alto":"--n4","muy alto":"--n5"};
+const NOMBRE_COMP = {trunk:"Tronco",neck:"Cuello",legs:"Piernas",
+                     upper_arm:"Brazo",lower_arm:"Antebrazo"};
+const MAX_COMP = {trunk:4,neck:3,legs:4,upper_arm:4,lower_arm:2};
+
+let PANEL = null, animacion = null;
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const color = nivel => css(COLOR[nivel] || "--tenue");
+const min = s => (s/60).toFixed(1) + " min";
+const el = (t, p={}) => Object.assign(document.createElement(t), p);
+
+// --- navegación ------------------------------------------------------------
+function ir(vista, ...args){
+  if (animacion) { cancelAnimationFrame(animacion); animacion = null; }
+  const migas = document.getElementById("migas");
+  migas.innerHTML = "";
+  if (vista !== "inicio") {
+    const b = el("button", {textContent:"Puestos de trabajo"});
+    b.onclick = () => ir("inicio");
+    migas.append(b);
+  }
+  if (vista === "evento") {
+    migas.append(el("span",{textContent:"›"}));
+    const b = el("button", {textContent: args[0].name});
+    b.onclick = () => ir("puesto", args[0]);
+    migas.append(b, el("span",{textContent:"› Evento"}));
+  } else if (vista === "puesto") {
+    migas.append(el("span",{textContent:"› " + args[0].name}));
+  }
+  ({inicio:vistaInicio, puesto:vistaPuesto, evento:vistaEvento})[vista](...args);
+}
+
+// --- pantalla 1: el ranking de puestos -------------------------------------
+function vistaInicio(){
+  const v = document.getElementById("vista");
+  v.innerHTML = "";
+  v.append(
+    el("div",{className:"titulo",innerHTML:"<h2>Puestos de trabajo</h2>"}),
+    el("div",{className:"sub",textContent:
+      `Ordenados por exposición acumulada. ${PANEL.puestos.length} puestos · datos del ${PANEL.generado}`})
+  );
+
+  const rejilla = el("div",{className:"rejilla"});
+  for (const p of PANEL.puestos){
+    const t = el("button",{className:"tarjeta"});
+    t.onclick = () => ir("puesto", p);
+    t.append(
+      el("h3",{textContent:p.name}),
+      el("div",{className:"id",textContent:p.id}),
+      el("div",{className:"cifra",innerHTML:
+        `${(p.seconds_at_risk/60).toFixed(1)}<small>min en riesgo</small>`})
+    );
+
+    const barra = el("div",{className:"barra"});
+    const total = p.seconds || 1;
+    for (const nivel of ["despreciable","bajo","medio","alto","muy alto"]){
+      const s = p.seconds_by_level[nivel] || 0;
+      if (s > 0) barra.append(el("i",{style:
+        `width:${100*s/total}%;background:${color(nivel)}`}));
+    }
+    t.append(barra);
+    t.append(el("div",{className:"pie",textContent:
+      `${p.shifts} turnos · ${min(p.seconds)} observados · ${p.total_events} eventos`}));
+    if (!p.configured) t.append(el("div",{className:"aviso",
+      textContent:"sin configurar · el riesgo real es mayor"}));
+    rejilla.append(t);
+  }
+  v.append(rejilla);
+}
+
+// --- pantalla 2: el informe de un puesto -----------------------------------
+function vistaPuesto(p){
+  const v = document.getElementById("vista");
+  v.innerHTML = "";
+  const cfg = p.configured
+    ? `carga ${p.config.load_kg} kg · agarre ${p.config.coupling}`
+    : "puesto sin configurar";
+  v.append(
+    el("div",{className:"titulo",innerHTML:`<h2>${p.name}</h2>`}),
+    el("div",{className:"sub",textContent:
+      `${p.id} · ${cfg} · umbral de acción REBA ${p.config.risk_threshold} · ` +
+      `${min(p.seconds)} observados, ${min(p.seconds_at_risk)} en riesgo`}),
+    el("div",{className:"recomendacion",innerHTML:
+      `<h3>Recomendación</h3>${p.recommendation}`})
+  );
+
+  v.append(el("div",{className:"titulo",innerHTML:"<h2>Riesgo por tarea</h2>"}),
+           el("div",{className:"sub",textContent:
+             "La que más daño acumula no siempre es la más severa: manda el tiempo."}));
+
+  const tabla = el("table");
+  tabla.innerHTML = `<tr><th>Tarea</th><th class="num">Tiempo</th>
+    <th class="num">En riesgo</th><th>Aporte al riesgo</th>
+    <th class="num">REBA</th><th>Causa</th></tr>`;
+  for (const t of p.tasks){
+    const fila = el("tr");
+    const nivel = t.median_reba >= 11 ? "muy alto" : t.median_reba >= 8 ? "alto"
+                : t.median_reba >= 4 ? "medio" : "bajo";
+    fila.innerHTML =
+      `<td class="tarea">${t.task}</td>
+       <td class="num">${(t.seconds_total/60).toFixed(1)} m</td>
+       <td class="num">${(t.seconds_at_risk/60).toFixed(1)} m</td>
+       <td><span class="medidor"><i style="width:${100*t.share_of_risk}%;
+           background:${color(nivel)}"></i></span>${Math.round(100*t.share_of_risk)}%</td>
+       <td class="num" style="color:${color(nivel)}">${t.median_reba}</td>
+       <td>${NOMBRE_COMP[t.dominant_component] || t.dominant_component}</td>`;
+    tabla.append(fila);
+  }
+  v.append(tabla);
+
+  v.append(el("div",{className:"titulo",style:"margin-top:32px",
+             innerHTML:"<h2>Eventos</h2>"}),
+           el("div",{className:"sub",textContent:
+             `${p.total_events} eventos detectados. Se listan los ${p.events.length} más graves, con su reconstrucción.`}));
+  for (const e of p.events){
+    const b = el("button",{className:"evento"});
+    b.onclick = () => ir("evento", p, e);
+    b.append(el("div",{className:"punto",textContent:e.peak_reba,
+      style:`background:${color(e.peak_level)}`}));
+    b.append(el("div",{innerHTML:
+      `<div class="tarea">${e.task}</div>
+       <div class="meta">${e.shift} · t+${e.start_seconds.toFixed(1)}s ·
+        ${e.duration_seconds.toFixed(1)}s ·
+        causa: ${NOMBRE_COMP[e.dominant_component]}</div>`}));
+    v.append(b);
+  }
+}
+
+// --- pantalla 3: el replay en esqueleto ------------------------------------
+function vistaEvento(p, e){
+  const v = document.getElementById("vista");
+  v.innerHTML = "";
+  v.append(el("div",{className:"titulo",innerHTML:`<h2>${e.task}</h2>`}),
+           el("div",{className:"sub",textContent:
+             `${p.name} · ${e.shift} · t+${e.start_seconds.toFixed(1)}s · ` +
+             `${e.duration_seconds.toFixed(1)} s · pico REBA ${e.peak_reba}`}));
+
+  const escena = el("div",{className:"escena"});
+  const izq = el("div");
+  const lienzo = el("canvas",{width:640,height:520});
+  izq.append(lienzo);
+
+  const controles = el("div",{className:"controles"});
+  const play = el("button",{textContent:"Pausa"});
+  const barra = el("input",{type:"range",min:0,max:e.keypoints.length-1,value:0});
+  const reloj = el("span");
+  controles.append(play, barra, reloj);
+  izq.append(controles);
+
+  const der = el("div");
+  const puntaje = el("div",{className:"grande"});
+  const nivel = el("div",{className:"nivel",style:"margin-bottom:22px"});
+  const comps = el("div");
+  der.append(puntaje, nivel, comps);
+
+  escena.append(izq, der);
+  v.append(escena);
+  v.append(el("div",{className:"sub",style:"margin-top:16px",textContent:
+    "Esto es todo lo que el sistema conserva del incidente: la posición de las " +
+    "articulaciones. No existe ninguna imagen que mostrar."}));
+
+  const ctx = lienzo.getContext("2d");
+  let i = 0, corriendo = true;
+
+  function pinta(){
+    const pts = e.keypoints[i], reba = e.reba[i];
+    const lvl = reba >= 11 ? "muy alto" : reba >= 8 ? "alto"
+              : reba >= 4 ? "medio" : reba >= 2 ? "bajo" : "despreciable";
+    const c = color(lvl);
+
+    ctx.fillStyle = css("--fondo");
+    ctx.fillRect(0,0,lienzo.width,lienzo.height);
+    ctx.strokeStyle = css("--borde"); ctx.lineWidth = 1;
+    for (let g = 0; g <= lienzo.width; g += 64){
+      ctx.beginPath(); ctx.moveTo(g,0); ctx.lineTo(g,lienzo.height); ctx.stroke();
+    }
+    for (let g = 0; g <= lienzo.height; g += 64){
+      ctx.beginPath(); ctx.moveTo(0,g); ctx.lineTo(lienzo.width,g); ctx.stroke();
+    }
+
+    // El esqueleto llega en 0..1: se estira al lienzo con el mismo factor en los
+    // dos ejes, que es lo que conserva los ángulos del cuerpo.
+    const escala = Math.min(lienzo.width, lienzo.height) * 0.8;
+    const dx = (lienzo.width - escala)/2, dy = (lienzo.height - escala)/2;
+    const X = k => pts[k][0]*escala + dx, Y = k => pts[k][1]*escala + dy;
+
+    ctx.strokeStyle = c; ctx.lineWidth = 5; ctx.lineCap = "round";
+    for (const [a,b] of HUESOS){
+      if ((pts[a][0]===0&&pts[a][1]===0) || (pts[b][0]===0&&pts[b][1]===0)) continue;
+      ctx.beginPath(); ctx.moveTo(X(a),Y(a)); ctx.lineTo(X(b),Y(b)); ctx.stroke();
+    }
+    ctx.fillStyle = c;
+    for (let k = 0; k < pts.length; k++){
+      if (pts[k][0]===0 && pts[k][1]===0) continue;
+      ctx.beginPath(); ctx.arc(X(k),Y(k),5,0,7); ctx.fill();
+    }
+
+    puntaje.textContent = reba;
+    puntaje.style.color = c;
+    nivel.textContent = lvl;
+    nivel.style.color = c;
+
+    comps.innerHTML = "";
+    for (const [clave, etiqueta] of Object.entries(NOMBRE_COMP)){
+      const valor = e.components[i][clave];
+      const fila = el("div",{className:"comp"});
+      fila.innerHTML = `<span>${etiqueta}</span>
+        <span class="medidor"><i style="width:${100*Math.min(valor/MAX_COMP[clave],1)}%;
+          background:${valor/MAX_COMP[clave] >= .75 ? css("--n4") : css("--n3")}"></i></span>
+        <span>${valor}</span>`;
+      comps.append(fila);
+    }
+    barra.value = i;
+    reloj.textContent = `${(i/PANEL.hz).toFixed(1)} s`;
+  }
+
+  let ultimo = 0;
+  function bucle(t){
+    if (corriendo && t - ultimo > 1000/PANEL.hz){
+      i = (i + 1) % e.keypoints.length;
+      ultimo = t; pinta();
+    }
+    animacion = requestAnimationFrame(bucle);
+  }
+  play.onclick = () => { corriendo = !corriendo; play.textContent = corriendo ? "Pausa" : "Reproducir"; };
+  barra.oninput = () => { corriendo = false; play.textContent = "Reproducir"; i = +barra.value; pinta(); };
+  pinta();
+  animacion = requestAnimationFrame(bucle);
+}
+
+fetch("/api/panel").then(r => r.json()).then(d => { PANEL = d; ir("inicio"); })
+  .catch(() => document.getElementById("vista").innerHTML =
+    '<div class="vacio">No hay datos. Corre <code>python scripts/build_demo_data.py</code></div>');
+</script>
+</body>
+</html>

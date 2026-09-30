@@ -9,6 +9,53 @@ aplicación, y mantiene esta guía diciendo explícitamente qué toca hacer.
 
 ---
 
+## VER EL PANEL
+
+```powershell
+Set-Location C:\Users\ASUS\Desktop\pose_stimation
+.\.venv\Scripts\python.exe scripts\build_demo_data.py      # genera los datos, ~3 min
+.\.venv\Scripts\python.exe -m uvicorn src.api.server:app --port 8000
+# y abrir http://127.0.0.1:8000/
+```
+
+Tres pantallas: el ranking de puestos, el informe de un puesto con su
+recomendación y su bandeja de eventos, y el replay en esqueleto de cada evento.
+
+**Dos cosas del panel que son decisiones, no detalles:**
+
+  · **Cada turno se predice con el modelo del pliegue que NO lo vio entrenando.**
+    La demo enseña predicciones sobre gente que el modelo no conoce, igual que en
+    una planta. Enseñar predicciones sobre los datos de entrenamiento daría una
+    demo más lucida y sería mentir.
+  · **Ningún recurso externo.** Una librería por CDN puede tardar o fallar justo
+    en la toma del vídeo y dejar la página sin estilos. Hay una prueba que se
+    niega a dejar entrar un `src` o `href` remoto.
+
+### El suelo de riesgo de un puesto, y por qué importa
+
+Medido el 30/09: una persona **de pie, erguida, sin hacer nada**, en un puesto
+configurado con 18 kg, agarre malo y carga brusca, ya puntúa **REBA 4**, que es el
+umbral de acción.
+
+| configuración del puesto | REBA de una postura neutra |
+|---|---|
+| sin configurar | 1 |
+| 12 kg, agarre regular | 3 |
+| 18 kg, agarre malo | 3 |
+| 18 kg, agarre malo, carga brusca | **4 — ya es riesgo medio** |
+
+No es un fallo: la norma dice que manipular 18 kg con mal agarre es riesgo aunque
+estés erguido, y tiene razón. Pero la consecuencia para el producto es incómoda y
+hay que decirla: **cuanto más pesada es la carga declarada, menos aporta la
+cámara**, porque el componente fijo ya decide por encima del umbral y la postura
+deja de cambiar el resultado.
+
+La salida, apuntada y **no implementada**: reportar además el **exceso postural**
+—cuánto añade la postura sobre el REBA que ese puesto tendría con una postura
+neutra—, que es una cifra en la que la visión siempre aporta. Mientras tanto, el
+puesto de la demo se configuró sin `sudden_load` para que no saliera el 100% del
+tiempo en rojo.
+
 ## LO QUE TIENES QUE HACER AHORA
 
 El dataset ya está descargado y verificado. Lo que bloquea ahora son **tres
