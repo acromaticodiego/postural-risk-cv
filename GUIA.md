@@ -176,6 +176,49 @@ resultado para no ajustar la vara:
 El reservado se decide aquí, con el conjunto sin tocar, que es la única ventana
 para decidirlo sin trampa. Un reservado usado no vuelve a ser un reservado.
 
+### EL NÚMERO A BATIR (2026-09-29)
+
+Medido sobre los 20 sujetos, 4 pliegues de validación cruzada por sujeto, 10 Hz,
+reservado sin tocar. La métrica es **F1 macro**, no *accuracy*: las clases están
+brutalmente desbalanceadas —`stand/place` tiene 12.010 fotogramas y `walk/hold`
+388— y un clasificador que conteste siempre lo mismo saca un *accuracy* decente sin
+haber aprendido nada.
+
+| campo | degenerado | reglas | **a batir** |
+|---|---|---|---|
+| **movimiento** (andar/de pie/agachado) | 0,287 | **0,673** | **0,673** |
+| **altura de trabajo** | 0,172 | **0,641** | **0,641** |
+| manipulación (recoger/colocar/sostener/alcanzar) | **0,113** | 0,048 | **0,113** |
+| objeto (caja/varilla) | **0,193** | 0,127 | **0,193** |
+| etiqueta completa, los 4 campos | **0,015** | 0,012 | **0,015** |
+
+**La línea base a batir es el máximo de los dos brazos**, no la de las reglas: en
+dos campos las reglas pierden contra el degenerado, y presentarlas como rival ahí
+sería ponerle el listón bajo al modelo.
+
+**Y donde el modelo tiene que ganar está identificado.** Las reglas hacen bien lo
+que se ve en un fotograma —si el tronco está doblado, a qué altura están las
+manos— y se estrellan en lo que necesita ver el tiempo:
+
+  · **`manipulation` es el hueco grande.** Recoger y colocar son **el mismo gesto
+    en dos sentidos**: un esqueleto suelto no sabe hacia dónde va el movimiento, y
+    por eso las reglas ni lo intentan. Una ventana temporal sí puede. Si el modelo
+    gana en algún sitio, tiene que ser aquí, y eso es exactamente la tesis del
+    proyecto.
+  · **`object` probablemente no es ganable**, y conviene decirlo por adelantado:
+    si lo que se levanta es una caja o una varilla no está en el esqueleto. Si el
+    modelo acierta ahí, la primera hipótesis no es que haya aprendido a ver el
+    objeto, sino que **ha memorizado el orden del guion del experimento** —todos
+    los participantes hacen las tareas en la misma secuencia—, y habrá que
+    comprobarlo antes de celebrarlo.
+
+**Los umbrales se calibran en entrenamiento**, no se ponen a ojo, para que la
+línea base no salga artificialmente débil. Medido: los valores calibrados (30°,
+25°, 30°, 30° de tronco según el pliegue) coinciden con los que se habían puesto
+a ojo, y el F1 macro pasa de 0,674 a 0,673. **Calibrar no cambió nada, y ahora se
+sabe en vez de suponerse.** La desviación del umbral entre pliegues es de 2,2°, o
+sea que las reglas no dependen de a quién le tocó entrenar.
+
 ### Fase 3 — Los modelos, que entrenas tú
 
 | quién | qué |
