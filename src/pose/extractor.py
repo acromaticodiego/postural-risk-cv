@@ -129,6 +129,102 @@ def extract_tracks(
     return sequences
 
 
+def extract_single_subject(
+    video_path: str | Path,
+    model_name: str = DEFAULT_MODEL,
+    device: int | str = 0,
+    stride: int = 1,
+    max_frames: int | None = None,
+) -> SkeletonSequence:
+    """Para vídeos con UNA sola persona: detecta por fotograma y no sigue a nadie.
+
+    Existe porque el seguimiento hace daño cuando no hace falta. Medido el 29/09
+    sobre el sujeto 01 de UW-IOM, que tiene un único participante: `extract_tracks`
+    produjo 14 identidades distintas, y la mayor cubría 515 de 1474 fotogramas
+    mientras otra de 500 era la misma persona partida por la mitad. Quedarse con
+    una sola identidad tiraba el 65% del vídeo, y la tirada no era aleatoria: se
+    perdían los tramos donde el detector titubea, que son justamente los de las
+    posturas raras que este proyecto quiere medir.
+
+    El criterio por fotograma es la caja de mayor ÁREA. En estos vídeos el
+    participante está cerca de la cámara y cualquier otra detección es de fondo. No
+    vale para una planta con varios operarios: allí hay que seguir e identificar, y
+    a quién se mide pasa a ser una decisión de producto.
+    """
+    from ultralytics import YOLO
+
+    video_path = Path(video_path)
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        raise FileNotFoundError(f"no se pudo abrir el vídeo: {video_path}")
+
+    source_fps = capture.get(cv2.CAP_PROP_FPS) or 0.0
+    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    model = YOLO(model_name)
+
+    keypoints: list[np.ndarray] = []
+    scores: list[np.ndarray] = []
+    boxes: list[np.ndarray] = []
+    present: list[bool] = []
+    read_index = 0
+    started = time.perf_counter()
+
+    while True:
+        ok, frame = capture.read()
+        if not ok:
+            break
+        if read_index % stride != 0:
+            read_index += 1
+            continue
+        read_index += 1
+
+        result = model.predict(frame, device=device, verbose=False)[0]
+        del frame  # el fotograma deja de existir aquí
+
+        boxes_xyxy = None if result.boxes is None else result.boxes.xyxy.cpu().numpy()
+        if boxes_xyxy is not None and len(boxes_xyxy):
+            areas = (boxes_xyxy[:, 2] - boxes_xyxy[:, 0]) * (boxes_xyxy[:, 3] - boxes_xyxy[:, 1])
+            slot = int(areas.argmax())
+            kp = result.keypoints.data.cpu().numpy()[slot]
+            keypoints.append(kp[:, :2])
+            scores.append(kp[:, 2])
+            boxes.append(boxes_xyxy[slot])
+            present.append(True)
+        else:
+            keypoints.append(np.zeros((N_JOINTS, 2), dtype=np.float32))
+            scores.append(np.zeros(N_JOINTS, dtype=np.float32))
+            boxes.append(np.zeros(4, dtype=np.float32))
+            present.append(False)
+
+        if max_frames is not None and len(present) >= max_frames:
+            break
+
+    capture.release()
+    present_arr = np.array(present, dtype=bool)
+    return SkeletonSequence(
+        keypoints=np.asarray(keypoints, dtype=np.float32),
+        scores=np.asarray(scores, dtype=np.float32),
+        boxes=np.asarray(boxes, dtype=np.float32),
+        present=present_arr,
+        meta={
+            "source": video_path.name,
+            "model": model_name,
+            "device": str(device),
+            "source_fps": round(source_fps, 3),
+            "stride": stride,
+            "effective_fps": round(source_fps / stride, 3) if source_fps else None,
+            "resolution": [width, height],
+            "frames_processed": len(present),
+            "frames_present": int(present_arr.sum()),
+            "selection": "largest_box_per_frame",
+            "tracking": False,
+            "extracted_on": date.today().isoformat(),
+            "extraction_seconds": round(time.perf_counter() - started, 2),
+        },
+    )
+
+
 def main_subject(sequences: dict[int, SkeletonSequence]) -> SkeletonSequence:
     """La persona con más fotogramas presentes.
 

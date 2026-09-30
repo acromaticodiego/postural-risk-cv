@@ -46,3 +46,56 @@ Lo que la hace valiosa es que se escribió **sabiendo** que esto pasa —la regl
 romper los propios tests venía heredada y el módulo llevaba el mecanismo
 explicado en su cabecera— y pasó igualmente, a la primera prueba escrita del
 proyecto. Leer la regla no basta: hay que ejecutar la mutación.
+
+---
+
+## 2. Un número plausible calculado sobre el 35% del vídeo (2026-09-29)
+
+**Qué se creía.** Que el extractor sacaba el esqueleto del participante de un
+vídeo de UW-IOM. La primera medida del sujeto 01 dio una separación bend/stand de
++29,61 grados: un número razonable, del orden del resto de los sujetos, sin
+ninguna señal de alarma.
+
+**Qué pasaba.** El extractor usaba el seguidor de ultralytics, y en un vídeo con
+UN SOLO participante el seguidor creó **14 identidades distintas**. La mayor
+cubría 515 de 1474 fotogramas, y había otra de 500 que era la misma persona
+partida por la mitad. El criterio de quedarse con la identidad de más fotogramas
+—razonable por sí solo— tiraba el **65% del vídeo**, y el número salía igual de
+plausible con un tercio de los datos.
+
+**Cómo se destapó.** No revisando el extractor, sino porque el diagnóstico del
+sujeto 3 llevaba un sujeto sano como CONTROL. El control existía para comprobar
+que el cálculo con YOLO era comparable al del Kinect, y de paso dejó a la vista
+que en el sujeto sano solo había 515 fotogramas de 1474. Sin el control, el
+extractor habría seguido perdiendo dos tercios del dataset en silencio.
+
+**Lo que lo hace peligroso.** Lo que se pierde no es aleatorio: el detector
+titubea justamente en las posturas raras, que son las que este proyecto quiere
+medir. Un dataset al que se le caen los fotogramas difíciles no da un número con
+más varianza, da un número optimista.
+
+**El arreglo.** `extract_single_subject`, que no sigue a nadie: detecta por
+fotograma y se queda con la caja de mayor área. Sobre los mismos vídeos pasa de
+515 a **1474 de 1474** fotogramas en el sujeto 1 y a 1144 de 1147 en el 3, y
+además es más rápido (11 ms por fotograma contra 77). El seguimiento vuelve a
+hacer falta cuando haya varios operarios, y entonces a quién se mide será una
+decisión de producto, no un detalle de implementación.
+
+**La lección.** Una herramienta de más no es gratis. El seguidor estaba ahí por
+previsión —«en una planta habrá varias personas»— y en el material de hoy solo
+hacía daño. Y el segundo filo: el control de un experimento sirve para más de lo
+que se escribió; este se puso para validar una comparación y lo que cazó fue un
+fallo del instrumento.
+
+---
+
+## Sustos que se comprobaron y NO eran falsos
+
+No todo lo sospechoso está mal, y anotar las falsas alarmas evita desconfiar de
+los números buenos.
+
+- **Dos sujetos dieron exactamente +30,11° de separación** (2026-09-29), con
+  distinto número de fotogramas y de etiquetas. Dos medidas independientes que
+  coinciden a dos decimales huelen a variable reutilizada, así que se comprobó con
+  más precisión: las medias son 36,22 / 6,12 en un sujeto y 39,16 / 9,05 en el
+  otro, y las diferencias 30,108353 y 30,114947. Coincidían solo al redondear.

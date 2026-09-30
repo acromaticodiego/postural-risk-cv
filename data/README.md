@@ -107,10 +107,34 @@ Gana alinear al final, y en 18 de 20 sujetos por separado. El mapeo por marca de
 tiempo da **el mismo resultado exacto** que el directo, así que los dos relojes ya
 van alineados y el adaptador no necesita interpolar por tiempo.
 
-**El sujeto 3 es la excepción y queda marcado como sospechoso:** da −2,67°, o sea
-que sus fotogramas `bend` salen *menos* inclinados que los `stand`, que es
-imposible con la alineación correcta. Qué hacer con él es una decisión de criterio
-sin tomar; lo que no se hace es meterlo en el conjunto como si nada.
+**3. El sujeto 3 tiene el esqueleto del Kinect defectuoso, y su vídeo está bien.**
+Daba −2,67°, o sea que sus fotogramas `bend` salían *menos* inclinados que los
+`stand`, que es imposible si etiquetas y esqueleto se corresponden. Diagnosticado
+con `scripts/probe_subject3.py`, que separa las dos hipótesis —esqueleto malo
+contra etiquetas malas— extrayendo el esqueleto del vídeo con YOLO, **y con un
+sujeto sano como control**, sin el cual el resultado no significaría nada:
+
+| | Kinect 3D | YOLO sobre el vídeo | fotogramas con persona |
+|---|---|---|---|
+| sujeto 1 (control) | +14,65° | +30,11° | 1474 de 1474 |
+| **sujeto 3** | **−2,67°** | **+30,11°** | 1144 de 1147 |
+
+O sea que el sensor de profundidad falló en esa grabación. **El sujeto 3 se
+conserva** y se usa por la vía del vídeo; queda excluido solo de lo que se calcule
+sobre el esqueleto del Kinect. Eso no es un caso aislado que arreglar, es un
+argumento más para que la medición publicable salga del vídeo: el Kinect trae
+sujetos malos y no lo avisa.
+
+Las dos separaciones coinciden en +30,11° por casualidad, comprobada: las medias
+son 36,22 / 6,12 en el sujeto 1 y 39,16 / 9,05 en el 3, y las diferencias son
+30,108353 y 30,114947. Coinciden solo al redondear.
+
+**4. Y la pista para la pregunta de la cámara contra el sensor de profundidad:**
+YOLO en 2D da **más** separación que el Kinect en 3D incluso en el sujeto sano
+(+30,11° contra +14,65°). No es que YOLO mida mejor: es que el ángulo proyectado
+en 2D **exagera** la inclinación del tronco respecto al ángulo real en 3D. Importa
+porque REBA corta por grados, así que exagerar sube el nivel de riesgo declarado.
+Con n=2 sujetos y una sola articulación esto es una pista, no una medición.
 
 ### Cómo dejarlo
 
