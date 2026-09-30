@@ -33,9 +33,10 @@ import cv2
 import numpy as np
 import torch
 
-from ..baseline.niosh import analyze_lift
+from ..baseline.niosh import _pixels_per_cm, analyze_lift
 from ..baseline.reba import action_level, reba_from_keypoints
 from ..datasets.uwiom import LABEL_FIELDS
+from ..load.carga import associate_to_person, build_load
 from ..models.tcn import SkeletonTCN, normalize_windows
 from ..pose.schema import N_JOINTS
 from ..product.workstation import COMPONENTS, WorkstationConfig
@@ -45,6 +46,14 @@ MODELO = RAIZ / "artifacts/modelo"
 
 TARGET_HZ = 10.0
 PREVIEW_WIDTH = 480
+
+# Cada cuántos fotogramas se busca la carga. Dos modelos en la ruta crítica no caben
+# en 100 ms: la pose sola cuesta ~74 ms en una RTX 3050 y el detector de carga añade
+# lo suyo. Una caja en las manos no se mueve de sitio en 300 ms —va pegada a la
+# persona, que sí se sigue a 10 Hz— así que se busca cada tres fotogramas y entre
+# medias se conserva la última. Bajar la tasa de la pose en su lugar sería peor:
+# rompería la ventana de 2 s con la que se entrenó el modelo de tareas.
+LOAD_EVERY = 3
 
 
 @dataclass
@@ -73,6 +82,7 @@ class LiveSession:
         camera: int = 0,
         model_dir: Path = MODELO,
         device: str | None = None,
+        load_weights: str | Path | None = None,
     ):
         self.config = config
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -115,6 +125,16 @@ class LiveSession:
         self._streak: list[tuple[int, str]] = []
         self._streak_poses: list[np.ndarray] = []
         self._streak_tasks: list[str] = []
+        self._streak_loads: list[np.ndarray | None] = []
+
+        # El detector de carga es opcional: sin él, el sistema funciona igual y
+        # NIOSH mide a las muñecas en vez de al centro de la caja.
+        self.load_detector = None
+        if load_weights and Path(load_weights).exists():
+            from ..load.carga import LoadDetector
+
+            self.load_detector = LoadDetector(str(load_weights), device=self.device)
+        self._last_load = None
         self._streak_start = 0.0
         self._last_task = "—"
 
@@ -209,6 +229,7 @@ class LiveSession:
 
         if presente:
             self.buffer.append(keypoints)
+            self._detect_load(frame, keypoints)
             datos = reba_from_keypoints(
                 keypoints[None, ...], assumptions=self.config.assumptions()
             )
@@ -235,6 +256,7 @@ class LiveSession:
             reba, componentes, angulos, nivel = 0, {c: 0 for c in COMPONENTS}, {}, "sin persona"
             self._last_task = "—"
             aviso = None
+            self._last_load = None
 
         self._track_event(reba, componentes, ahora, keypoints if presente else None)
 
@@ -248,6 +270,7 @@ class LiveSession:
             "angles": angulos,
             "task": self._last_task,
             "task_warning": aviso,
+            "load": self._load_payload(),
             "skeleton": self._canvas_skeleton(keypoints, caja) if presente else None,
             "seconds_by_level": {k: round(v, 1) for k, v in self.seconds_by_level.items()},
             "events": [e.__dict__ for e in self.events[-8:]],
@@ -297,6 +320,55 @@ class LiveSession:
         ok, buffer = cv2.imencode(".jpg", pequeno, [cv2.IMWRITE_JPEG_QUALITY, 70])
         return base64.b64encode(buffer).decode("ascii") if ok else ""
 
+    def _detect_load(self, frame, keypoints: np.ndarray) -> None:
+        """Busca la carga y decide si está en las manos.
+
+        Solo cada `LOAD_EVERY` fotogramas, y entre medias se conserva la anterior:
+        dos modelos no caben en los 100 ms del ciclo, y una caja sostenida no se
+        mueve de las manos en 300 ms.
+        """
+        if self.load_detector is None or frame is None:
+            return
+        if self.frames % LOAD_EVERY != 0 and self._last_load is not None:
+            return
+        cajas, confianzas, poligonos = self.load_detector.detect(frame)
+        indice = associate_to_person(cajas, keypoints)
+        if indice is None:
+            self._last_load = None
+            return
+        px_cm = None
+        if self.config.worker_height_cm:
+            px_cm = _pixels_per_cm(keypoints, self.config.worker_height_cm)
+        self._last_load = build_load(
+            cajas[indice],
+            float(confianzas[indice]),
+            px_cm,
+            tuple(self.config.load_catalog) or None,
+            poligonos[indice] if indice < len(poligonos) else None,
+        )
+
+    def _load_payload(self) -> dict | None:
+        if self._last_load is None:
+            return None
+        c = self._last_load
+        return {
+            "box": c.box,
+            "center": c.center,
+            "confidence": c.confidence,
+            "width_cm": c.width_cm,
+            "matched": c.matched.name if c.matched else None,
+            "weight_kg": c.weight_kg,
+        }
+
+    @property
+    def _effective_load_kg(self) -> float | None:
+        """El peso que se aplica: el de la carga vista si el catálogo la reconoce, y
+        si no el del puesto. Es el salto de «una constante» a «lo que hay en las
+        manos»."""
+        if self._last_load is not None and self._last_load.weight_kg is not None:
+            return self._last_load.weight_kg
+        return self.config.load_kg
+
     def _track_event(
         self,
         reba: int,
@@ -310,11 +382,15 @@ class LiveSession:
                 self._streak_start = ahora
                 self._streak_poses = []
                 self._streak_tasks = []
+                self._streak_loads = []
             peor = max(componentes, key=componentes.get) if componentes else "trunk"
             self._streak.append((reba, peor))
             if keypoints is not None:
                 self._streak_poses.append(keypoints)
             self._streak_tasks.append(self._last_task)
+            self._streak_loads.append(
+                np.array(self._last_load.center) if self._last_load else None
+            )
             return
         if self._streak:
             duracion = len(self._streak) / TARGET_HZ
@@ -337,14 +413,26 @@ class LiveSession:
                     any(t in tarea_evento for t in LIFTING_TASKS)
                     and len(self._streak_poses) >= 2
                 ):
+                    # Los centros de la carga solo se pasan si se vio en TODOS los
+                    # fotogramas del tramo: una lista a medias mezclaría la posición
+                    # de la caja en unos instantes con la de las muñecas en otros, y
+                    # la distancia resultante no sería de ningún momento concreto.
+                    centros = (
+                        np.stack(self._streak_loads)
+                        if self._streak_loads
+                        and len(self._streak_loads) == len(self._streak_poses)
+                        and all(c is not None for c in self._streak_loads)
+                        else None
+                    )
                     analisis = analyze_lift(
                         np.stack(self._streak_poses),
                         TARGET_HZ,
                         worker_height_cm=self.config.worker_height_cm,
-                        load_kg=self.config.load_kg,
+                        load_kg=self._effective_load_kg,
                         coupling=self.config.coupling,
                         asymmetry_deg=45.0 if self.config.task_requires_twist else 0.0,
                         lifts_per_min=self.config.lifts_per_min or 2.0,
+                        load_centers=centros,
                     ).__dict__
                 self.events.append(
                     LiveEvent(
@@ -360,6 +448,7 @@ class LiveSession:
             self._streak = []
             self._streak_poses = []
             self._streak_tasks = []
+            self._streak_loads = []
 
     def close(self) -> None:
         self.capture.release()

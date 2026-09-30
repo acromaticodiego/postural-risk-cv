@@ -80,6 +80,12 @@ class LiftAnalysis:
     scale_estimated: bool
     """True si la estatura del trabajador no se declaró y se asumió una media."""
 
+    measured_at_load: bool = False
+    """True si la distancia horizontal se midió al CENTRO DE LA CARGA detectada, que
+    es lo que pide la norma. False si se usó el punto medio de las muñecas, que la
+    subestima un poco porque el centro de una caja queda por delante de los
+    nudillos."""
+
     @property
     def verdict(self) -> str:
         if self.lifting_index is None:
@@ -166,17 +172,31 @@ def analyze_lift(
     coupling: str | None = None,
     asymmetry_deg: float = 0.0,
     lifts_per_min: float = 1.0,
+    load_centers: np.ndarray | None = None,
 ) -> LiftAnalysis:
     """Analiza un levantamiento a partir de la secuencia de esqueletos del evento.
 
     Los multiplicadores se calculan en el ORIGEN del levantamiento —el fotograma en
-    que las manos están más bajas—, que es lo que pide la norma: es el instante en
-    que la columna soporta el peor momento de fuerza.
+    que la carga está más baja—, que es lo que pide la norma: es el instante en que
+    la columna soporta el peor momento de fuerza.
+
+    `load_centers` son los centros de la carga detectada, uno por fotograma. Cuando
+    se dan, la distancia horizontal se mide **al centro de la carga**, que es lo que
+    la norma pide literalmente. Sin ellos se usa el punto medio de las muñecas, que
+    es una aproximación razonable —la carga está donde están las manos— y que
+    subestima un poco: el centro de una caja queda por delante de los nudillos, así
+    que la distancia real es algo mayor que la medida. Conviene saber hacia dónde se
+    equivoca cada versión.
     """
     estimada = worker_height_cm is None
     altura = worker_height_cm or DEFAULT_WORKER_HEIGHT_CM
 
-    manos = keypoints_sequence[:, [JOINT["left_wrist"], JOINT["right_wrist"]], :].mean(axis=1)
+    if load_centers is not None and len(load_centers) == len(keypoints_sequence):
+        manos = np.asarray(load_centers, dtype=np.float64)
+    else:
+        manos = keypoints_sequence[
+            :, [JOINT["left_wrist"], JOINT["right_wrist"]], :
+        ].mean(axis=1)
     # En coordenadas de imagen la y crece hacia abajo: las manos MÁS BAJAS son las
     # de y mayor.
     origen = int(np.argmax(manos[:, 1]))
@@ -213,4 +233,5 @@ def analyze_lift(
         recommended_weight_kg=round(rwl, 2),
         lifting_index=round(load_kg / rwl, 2) if load_kg and rwl > 0 else None,
         scale_estimated=estimada,
+        measured_at_load=load_centers is not None and len(load_centers) == len(keypoints_sequence),
     )

@@ -211,6 +211,35 @@ def test_a_lift_closed_live_carries_its_niosh_analysis() -> None:
     assert sosteniendo.niosh is None, "sostener no es levantar: NIOSH no aplica"
 
 
+def test_the_weight_applied_is_the_one_seen_not_the_one_configured() -> None:
+    """El salto de «una constante del puesto» a «lo que hay en las manos».
+
+    Con catálogo y una carga reconocida, el peso que entra en NIOSH es el de esa
+    carga. Sin carga reconocida, se cae al del puesto — y eso también tiene que
+    funcionar, porque es lo que pasa cuando el detector no ve nada.
+    """
+    from src.load.carga import LoadCatalogEntry, build_load
+
+    catalogo = (
+        LoadCatalogEntry("pequena", width_cm=28.0, weight_kg=5.0),
+        LoadCatalogEntry("grande", width_cm=48.0, weight_kg=18.0),
+    )
+    s = _sesion(load_kg=12.0, coupling="fair", worker_height_cm=170, load_catalog=catalogo)
+
+    assert s._effective_load_kg == 12.0, "sin carga vista se usa el peso del puesto"
+
+    # Una caja de 48 cm con la escala de una persona de 170 cm en 500 px.
+    px_cm = 500 / (170 * 0.94)
+    ancho = 48 * px_cm
+    s._last_load = build_load(
+        [100, 100, 100 + ancho, 180], 0.9, px_cm, catalogo
+    )
+    assert s._last_load.matched.name == "grande"
+    assert s._effective_load_kg == 18.0, (
+        "con la carga reconocida, el peso aplicado es el suyo y no el del puesto"
+    )
+
+
 def test_live_payload_has_no_image_unless_preview_is_asked() -> None:
     """La imagen solo viaja cuando se pide la vista de instalación, y aun así es
     efímera: ningún camino del código la escribe en disco."""

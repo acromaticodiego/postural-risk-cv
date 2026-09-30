@@ -182,6 +182,41 @@ def test_perfect_lift_allows_the_load_constant() -> None:
     assert "sin peso declarado" in analisis.verdict
 
 
+def test_measuring_at_the_load_centre_is_marked_and_changes_the_distance() -> None:
+    """Con la carga detectada, la distancia se mide donde la norma pide.
+
+    Sin ella se usa el punto medio de las muñecas, que SUBESTIMA: el centro de una
+    caja queda por delante de los nudillos. Que el resultado diga por cuál de las
+    dos vías se midió es parte de poder confiar en el número.
+    """
+    secuencia = _secuencia(_origen(60), _destino())
+    manos = secuencia[:, [JOINT["left_wrist"], JOINT["right_wrist"]], :].mean(axis=1)
+    # El centro de la caja, 25 px más allá de las manos y alejándose del cuerpo.
+    centros = manos + np.array([25.0, 0.0])
+
+    sin_carga = analyze_lift(secuencia, HZ, worker_height_cm=170, load_kg=12)
+    con_carga = analyze_lift(secuencia, HZ, worker_height_cm=170, load_kg=12, load_centers=centros)
+
+    assert not sin_carga.measured_at_load and con_carga.measured_at_load
+    assert con_carga.horizontal_cm > sin_carga.horizontal_cm, (
+        "medir al centro de la carga tiene que dar una distancia mayor que a las muñecas: "
+        f"{sin_carga.horizontal_cm} y {con_carga.horizontal_cm}"
+    )
+    assert con_carga.lifting_index >= sin_carga.lifting_index, (
+        "y por tanto un índice igual o peor, nunca mejor"
+    )
+
+
+def test_load_centres_of_the_wrong_length_are_ignored() -> None:
+    """Una lista de centros que no cuadra con la secuencia se descarta en vez de
+    emparejarse a medias: mezclar fotogramas daría una distancia de otro instante."""
+    secuencia = _secuencia(_origen(60), _destino())
+    analisis = analyze_lift(
+        secuencia, HZ, worker_height_cm=170, load_kg=12, load_centers=np.zeros((3, 2))
+    )
+    assert not analisis.measured_at_load
+
+
 def test_unknown_worker_height_is_flagged() -> None:
     """Un número en centímetros sacado de una estatura inventada tiene que decirlo."""
     con = analyze_lift(_secuencia(_origen(60), _destino()), HZ, worker_height_cm=170, load_kg=12)

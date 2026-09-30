@@ -57,6 +57,12 @@ class WorkstationConfig:
     evaluador midiendo sobre una foto. Sin declararla se asume una media y el
     resultado se marca como estimado."""
 
+    load_catalog: tuple = ()
+    """Los tipos de carga que el cliente declara para este puesto, como entradas de
+    `LoadCatalogEntry` (nombre, anchura en cm, peso en kg). Con catálogo, el peso
+    deja de ser una constante del puesto y se aplica el que corresponde a la carga
+    que se ve en cada levantamiento; sin él, se usa `load_kg` para todo."""
+
     lifts_per_min: float | None = None
     """Levantamientos por minuto SOSTENIDOS en el puesto. Se declara y no se mide,
     y esto costó un número inflado antes de entenderlo: NIOSH supone que la
