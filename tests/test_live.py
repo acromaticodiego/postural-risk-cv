@@ -174,6 +174,43 @@ def test_trust_guard_flags_a_camera_angle_it_never_trained_on() -> None:
     assert aviso and "angulo" in aviso, f"no avisó del ángulo fuera de rango: {aviso}"
 
 
+def test_a_lift_closed_live_carries_its_niosh_analysis() -> None:
+    """En vivo, un evento de levantamiento tiene que traer los kilos, como en el panel.
+
+    Y uno que NO sea levantamiento no debe traerlos: la ecuación mide levantar una
+    carga, y aplicarla a estar de pie en mala postura daría un índice sin
+    significado que el panel mostraría igual de creíble.
+    """
+    sujeto = load(1)
+    puntos = sujeto.keypoints[sujeto.evaluable]
+
+    def correr(tarea: str):
+        s = _sesion(load_kg=15, coupling="poor", worker_height_cm=172, lifts_per_min=3)
+        peligrosa = next(
+            (p for p in puntos if s.step(feed=(p, _caja(p)))["reba"] >= s.config.risk_threshold),
+            None,
+        )
+        assert peligrosa is not None
+        # Se sustituye el predictor entero: fijar `_last_task` no vale porque el
+        # modelo lo recalcula cada tres fotogramas y lo pisaría.
+        s.predict_task = lambda: tarea
+        s._last_task = tarea
+        for _ in range(int(TARGET_HZ * 1.5)):
+            s.step(feed=(peligrosa, _caja(peligrosa)))
+        segura = min(puntos, key=lambda p: s.step(feed=(p, _caja(p)))["reba"])
+        for _ in range(3):
+            s.step(feed=(segura, _caja(segura)))
+        return s.events[-1]
+
+    levantando = correr("bend / pick-up / low")
+    assert levantando.niosh, "un levantamiento en vivo tiene que traer el analisis NIOSH"
+    assert levantando.niosh["recommended_weight_kg"] > 0
+    assert levantando.niosh["lifting_index"] is not None, "con peso declarado tiene que haber indice"
+
+    sosteniendo = correr("stand / hold / mid")
+    assert sosteniendo.niosh is None, "sostener no es levantar: NIOSH no aplica"
+
+
 def test_live_payload_has_no_image_unless_preview_is_asked() -> None:
     """La imagen solo viaja cuando se pide la vista de instalación, y aun así es
     efímera: ningún camino del código la escribe en disco."""

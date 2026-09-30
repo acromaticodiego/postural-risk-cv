@@ -101,6 +101,12 @@ async def live(socket: WebSocket) -> None:
             name=parametros.get("name", "Camara en vivo"),
             load_kg=float(parametros["load_kg"]) if parametros.get("load_kg") else None,
             coupling=parametros.get("coupling") or None,
+            worker_height_cm=(
+                float(parametros["height_cm"]) if parametros.get("height_cm") else None
+            ),
+            lifts_per_min=(
+                float(parametros["lifts_per_min"]) if parametros.get("lifts_per_min") else None
+            ),
         )
         sesion = LiveSession(config, camera=int(parametros.get("camera", 0)))
         intervalo = 1.0 / TARGET_HZ

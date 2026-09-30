@@ -480,6 +480,9 @@ function vistaEnVivo(){
   tira.append(marcador, centro);
   v.append(tira);
 
+  const nioshVivo = el("div");
+  v.append(nioshVivo);
+
   const listaEventos = el("div",{style:"margin-top:22px"});
   v.append(el("div",{className:"titulo",style:"margin-top:26px",
              innerHTML:"<h2>Eventos detectados</h2>"}),
@@ -555,6 +558,10 @@ function vistaEnVivo(){
         <span>${valor}</span>`;
       comps.append(fila);
     }
+
+    const ultimoLift = [...d.events].reverse().find(e => e.niosh);
+    nioshVivo.innerHTML = "";
+    if (ultimoLift) nioshVivo.append(tarjetaNiosh(ultimoLift.niosh, null));
 
     if (d.total_events){
       document.getElementById("conteo-eventos").textContent =

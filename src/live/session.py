@@ -33,6 +33,7 @@ import cv2
 import numpy as np
 import torch
 
+from ..baseline.niosh import analyze_lift
 from ..baseline.reba import action_level, reba_from_keypoints
 from ..datasets.uwiom import LABEL_FIELDS
 from ..models.tcn import SkeletonTCN, normalize_windows
@@ -54,6 +55,13 @@ class LiveEvent:
     peak_level: str
     dominant_component: str
     task: str
+    niosh: dict | None = None
+    """Solo si el evento fue un LEVANTAMIENTO. La ecuación mide levantar una carga,
+    no estar de pie en mala postura."""
+
+
+# Un evento es un levantamiento si su tarea lo dice. Igual que en el modo por lotes.
+LIFTING_TASKS = ("pick-up", "place")
 
 
 class LiveSession:
@@ -105,6 +113,8 @@ class LiveSession:
         self.seconds_by_level: dict[str, float] = {}
         self.events: list[LiveEvent] = []
         self._streak: list[tuple[int, str]] = []
+        self._streak_poses: list[np.ndarray] = []
+        self._streak_tasks: list[str] = []
         self._streak_start = 0.0
         self._last_task = "—"
 
@@ -226,7 +236,7 @@ class LiveSession:
             self._last_task = "—"
             aviso = None
 
-        self._track_event(reba, componentes, ahora)
+        self._track_event(reba, componentes, ahora, keypoints if presente else None)
 
         salida = {
             "frame": self.frames,
@@ -287,13 +297,24 @@ class LiveSession:
         ok, buffer = cv2.imencode(".jpg", pequeno, [cv2.IMWRITE_JPEG_QUALITY, 70])
         return base64.b64encode(buffer).decode("ascii") if ok else ""
 
-    def _track_event(self, reba: int, componentes: dict[str, int], ahora: float) -> None:
+    def _track_event(
+        self,
+        reba: int,
+        componentes: dict[str, int],
+        ahora: float,
+        keypoints: np.ndarray | None = None,
+    ) -> None:
         """Cierra un tramo de riesgo cuando termina, no mientras dura."""
         if reba >= self.config.risk_threshold:
             if not self._streak:
                 self._streak_start = ahora
+                self._streak_poses = []
+                self._streak_tasks = []
             peor = max(componentes, key=componentes.get) if componentes else "trunk"
             self._streak.append((reba, peor))
+            if keypoints is not None:
+                self._streak_poses.append(keypoints)
+            self._streak_tasks.append(self._last_task)
             return
         if self._streak:
             duracion = len(self._streak) / TARGET_HZ
@@ -301,6 +322,30 @@ class LiveSession:
                 picos = [r for r, _ in self._streak]
                 causas = [c for _, c in self._streak]
                 pico = max(picos)
+                # La tarea del evento es la DOMINANTE durante el tramo, no la del
+                # fotograma que lo cierra: ese es justo aquel en el que el riesgo ya
+                # bajó, y su tarea suele ser otra. Es como se hace en el modo por
+                # lotes, y aquí estaba mal.
+                candidatas = [t for t in self._streak_tasks if "/" in t]
+                tarea_evento = (
+                    max(set(candidatas), key=candidatas.count) if candidatas else self._last_task
+                )
+                # NIOSH solo si el tramo fue un levantamiento y hay esqueletos con
+                # los que medir la distancia de la carga al cuerpo.
+                analisis = None
+                if (
+                    any(t in tarea_evento for t in LIFTING_TASKS)
+                    and len(self._streak_poses) >= 2
+                ):
+                    analisis = analyze_lift(
+                        np.stack(self._streak_poses),
+                        TARGET_HZ,
+                        worker_height_cm=self.config.worker_height_cm,
+                        load_kg=self.config.load_kg,
+                        coupling=self.config.coupling,
+                        asymmetry_deg=45.0 if self.config.task_requires_twist else 0.0,
+                        lifts_per_min=self.config.lifts_per_min or 2.0,
+                    ).__dict__
                 self.events.append(
                     LiveEvent(
                         start_seconds=round(self._streak_start, 1),
@@ -308,10 +353,13 @@ class LiveSession:
                         peak_reba=pico,
                         peak_level=action_level(pico),
                         dominant_component=max(set(causas), key=causas.count),
-                        task=self._last_task,
+                        task=tarea_evento,
+                        niosh=analisis,
                     )
                 )
             self._streak = []
+            self._streak_poses = []
+            self._streak_tasks = []
 
     def close(self) -> None:
         self.capture.release()
