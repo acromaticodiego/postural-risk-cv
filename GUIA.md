@@ -64,6 +64,30 @@ y es un argumento de venta antes que una decisión técnica.
 
 ---
 
+## EL ENTREGABLE ES UN VÍDEO CON INTERFAZ, Y ESO CONDICIONA TODO
+
+Decidido por Juan Diego el 29/09: el proyecto termina en **un vídeo de todo el
+funcionamiento** que sube a LinkedIn, con **una interfaz que muestre lo que el
+sistema hace**, y tiene que leerse como algo escalable y de alto impacto.
+
+Eso no es un requisito de la última fase, es una restricción de diseño desde la
+primera, y tiene tres consecuencias concretas:
+
+  · **Lo que el vídeo tenga que mostrar hay que guardarlo mientras se procesa.**
+    Por eso el `.npz` lleva los keypoints crudos y todos los componentes de REBA
+    se devuelven por separado en vez de solo el puntaje final: un informe que
+    solo dice «riesgo alto» no se puede grabar de forma interesante, y uno que
+    dice «riesgo alto porque el tronco va a 62° recogiendo de una superficie
+    baja» sí.
+  · **La interfaz tiene que hacer visible el MECANISMO, no solo el resultado.**
+    Lo que impresiona en treinta segundos es ver al sistema decidir: el esqueleto
+    encima de la persona, los ángulos en vivo, el componente que dispara el
+    puntaje, y el contador de exposición subiendo por puesto de trabajo.
+  · **La pieza que hace la demo es el replay en esqueleto.** Se reproduce el
+    incidente sin vídeo: se ve exactamente qué pasó y no hay imagen de nadie. Es
+    la garantía de privacidad demostrada en pantalla en vez de explicada en el
+    README, y es lo que un jefe de planta necesita ver para creérsela.
+
 ## POR QUÉ ESTO NO ES EL TUTORIAL DE YOUTUBE
 
 "Pose estimation + calcular un ángulo" es una tarde de trabajo. Lo que separa
