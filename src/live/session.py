@@ -71,6 +71,7 @@ class LiveSession:
 
         meta = json.loads((model_dir / "tcn.json").read_text(encoding="utf-8"))
         self.classes = meta["clases"]
+        self.view = meta["vista"]
         self.window_frames = int(round(meta["window_seconds"] * meta["hz"]))
         self.hz = float(meta["hz"])
         if abs(self.hz - TARGET_HZ) > 1e-6:
@@ -121,6 +122,44 @@ class LiveSession:
         areas = (cajas[:, 2] - cajas[:, 0]) * (cajas[:, 3] - cajas[:, 1])
         slot = int(areas.argmax())
         return frame, resultado.keypoints.data.cpu().numpy()[slot, :, :2], cajas[slot]
+
+    def check_trust(self, task: str, trunk_deg: float, keypoints: np.ndarray) -> str | None:
+        """¿Hay motivo para no fiarse de la tarea que acaba de predecir el modelo?
+
+        Nace de una prueba real (30/09): con la cámara de un portátil en un salón, el
+        modelo contestó `bend` mientras la geometría medía 2 grados de tronco. El
+        puntaje de riesgo estaba bien —REBA no depende del modelo— pero la tarea era
+        imposible, y el panel la mostraba con la misma seguridad que las demás.
+
+        Se comprueban dos cosas independientes:
+
+          · **Coherencia.** La tarea y los ángulos salen de dos caminos distintos: uno
+            aprendido y otro geométrico. Cuando se contradicen, al menos uno se
+            equivoca, y el geométrico es el que está atado a la norma.
+          · **Dominio de validez.** La razón entre anchura de hombros y altura del
+            cuerpo describe el ángulo de cámara. Fuera del rango que el modelo vio
+            entrenando está extrapolando, y un modelo que extrapola contesta con la
+            misma seguridad que cuando sabe.
+
+        Un sistema que sabe cuándo no sabe vale más que uno que acierta un poco más.
+        """
+        from ..pose.schema import JOINT
+
+        alto = max(float(keypoints[:, 1].max() - keypoints[:, 1].min()), 1.0)
+        razon = abs(
+            float(keypoints[JOINT["left_shoulder"], 0] - keypoints[JOINT["right_shoulder"], 0])
+        ) / alto
+        if not (self.view["shoulder_ratio_p01"] <= razon <= self.view["shoulder_ratio_p99"]):
+            return (
+                f"angulo de camara fuera de lo entrenado (hombros/altura {razon:.2f}, "
+                f"visto {self.view['shoulder_ratio_p01']:.2f}-{self.view['shoulder_ratio_p99']:.2f}): "
+                "la tarea no es fiable"
+            )
+        if task.startswith("bend") and trunk_deg < 20:
+            return f"el modelo dice agachado y el tronco mide {trunk_deg:.0f} grados: no cuadra"
+        if task.startswith("stand") and trunk_deg > 50:
+            return f"el modelo dice de pie y el tronco mide {trunk_deg:.0f} grados: no cuadra"
+        return None
 
     def predict_task(self) -> str:
         """La tarea, en cuanto hay ventana completa. Antes, no se inventa nada."""
@@ -176,10 +215,16 @@ class LiveSession:
             # contexto» hasta que tocara el siguiente múltiplo de tres.
             if self.frames % 3 == 0 or "/" not in self._last_task:
                 self._last_task = self.predict_task()
+            aviso = (
+                self.check_trust(self._last_task, angulos.get("trunk_flexion", 0.0), keypoints)
+                if "/" in self._last_task
+                else None
+            )
         else:
             self.buffer.clear()
             reba, componentes, angulos, nivel = 0, {c: 0 for c in COMPONENTS}, {}, "sin persona"
             self._last_task = "—"
+            aviso = None
 
         self._track_event(reba, componentes, ahora)
 
@@ -192,6 +237,7 @@ class LiveSession:
             "components": componentes,
             "angles": angulos,
             "task": self._last_task,
+            "task_warning": aviso,
             "skeleton": self._canvas_skeleton(keypoints, caja) if presente else None,
             "seconds_by_level": {k: round(v, 1) for k, v in self.seconds_by_level.items()},
             "events": [e.__dict__ for e in self.events[-8:]],

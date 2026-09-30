@@ -127,6 +127,53 @@ def test_skeleton_sent_to_the_browser_is_in_canvas_range() -> None:
         assert -0.2 <= x <= 1.2 and -0.2 <= y <= 1.2, f"punto fuera del lienzo: ({x}, {y})"
 
 
+def test_trust_guard_catches_a_task_that_contradicts_the_geometry() -> None:
+    """El guardia que nació de la prueba con la cámara del portátil.
+
+    El modelo contestaba `bend` mientras el tronco medía 2 grados. La tarea y los
+    ángulos salen de dos caminos distintos —uno aprendido y otro geométrico— así que
+    cuando se contradicen, al menos uno se equivoca, y el geométrico es el que está
+    atado a la norma.
+    """
+    s = _sesion()
+    sujeto = load(1)
+    erguido = sujeto.keypoints[sujeto.evaluable][0]
+
+    assert s.check_trust("bend / pick-up / low", 2.0, erguido), (
+        "no detectó que 'agachado' con 2 grados de tronco es imposible"
+    )
+    assert s.check_trust("stand / place / mid", 70.0, erguido), (
+        "no detectó que 'de pie' con 70 grados de tronco es imposible"
+    )
+    assert s.check_trust("bend / pick-up / low", 65.0, erguido) is None, (
+        "'agachado' con 65 grados de tronco es coherente y no debería avisar"
+    )
+
+
+def test_trust_guard_flags_a_camera_angle_it_never_trained_on() -> None:
+    """Fuera del rango de vistas visto, la tarea se marca como no fiable.
+
+    Un modelo que extrapola contesta con la misma seguridad que cuando sabe, y el
+    panel lo mostraba igual que cualquier otra predicción.
+    """
+    s = _sesion()
+    sujeto = load(1)
+    puntos = sujeto.keypoints[sujeto.evaluable][0].copy()
+
+    # Se separan los hombros a lo ancho hasta salirse del rango entrenado, que es lo
+    # que ocurre cuando alguien se pone de frente y cerca de la cámara.
+    from src.pose.schema import JOINT
+
+    alto = puntos[:, 1].max() - puntos[:, 1].min()
+    centro = (puntos[JOINT["left_shoulder"], 0] + puntos[JOINT["right_shoulder"], 0]) / 2
+    exceso = alto * (s.view["shoulder_ratio_p99"] + 0.15)
+    puntos[JOINT["left_shoulder"], 0] = centro - exceso / 2
+    puntos[JOINT["right_shoulder"], 0] = centro + exceso / 2
+
+    aviso = s.check_trust("bend / pick-up / low", 65.0, puntos)
+    assert aviso and "angulo" in aviso, f"no avisó del ángulo fuera de rango: {aviso}"
+
+
 def test_live_payload_has_no_image_unless_preview_is_asked() -> None:
     """La imagen solo viaja cuando se pide la vista de instalación, y aun así es
     efímera: ningún camino del código la escribe en disco."""

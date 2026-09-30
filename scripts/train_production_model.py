@@ -83,6 +83,30 @@ def main() -> None:
         if (epoca + 1) % 10 == 0:
             print(f"  epoca {epoca + 1:>3}  perdida {total / n:.4f}")
 
+    # El RANGO DE VISTAS que el modelo ha visto. Se guarda con los pesos porque un
+    # modelo sin su dominio de validez es un modelo que contesta con la misma
+    # seguridad dentro y fuera de lo que conoce. La razón entre la anchura de
+    # hombros y la altura del cuerpo describe el ángulo de cámara: pequeña de
+    # perfil, grande de frente.
+    from src.pose.schema import JOINT
+
+    razones = []
+    for s in datos:
+        kp = s.keypoints
+        alto = np.maximum(kp[:, :, 1].max(axis=1) - kp[:, :, 1].min(axis=1), 1.0)
+        hombros = np.abs(kp[:, JOINT["left_shoulder"], 0] - kp[:, JOINT["right_shoulder"], 0])
+        razones.append(hombros / alto)
+    razones = np.concatenate(razones)
+    vista = {
+        "shoulder_ratio_p01": float(np.percentile(razones, 1)),
+        "shoulder_ratio_p99": float(np.percentile(razones, 99)),
+        "shoulder_ratio_median": float(np.median(razones)),
+    }
+    print(
+        f"\nvistas entrenadas: hombros/altura de {vista['shoulder_ratio_p01']:.3f} "
+        f"a {vista['shoulder_ratio_p99']:.3f} (mediana {vista['shoulder_ratio_median']:.3f})"
+    )
+
     DESTINO.mkdir(parents=True, exist_ok=True)
     torch.save(modelo.state_dict(), DESTINO / "tcn.pt")
     (DESTINO / "tcn.json").write_text(
@@ -95,6 +119,7 @@ def main() -> None:
                 "window_seconds": WINDOW_SECONDS,
                 "epocas": epocas,
                 "clases": clases,
+                "vista": vista,
                 "ventanas": int(n),
                 "parametros": modelo.n_parameters,
                 "nota": (

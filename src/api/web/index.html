@@ -413,6 +413,8 @@ function vistaEnVivo(){
   const centro = el("div");
   centro.append(el("div",{className:"etiqueta",textContent:"Tarea reconocida"}));
   const tarea = el("div",{className:"tarea-viva",textContent:"—"});
+  const avisoTarea = el("div",{className:"aviso",style:"display:none"});
+  centro.append(avisoTarea);
   const comps = el("div",{style:"margin-top:14px;max-width:420px"});
   centro.append(tarea, comps);
   tira.append(marcador, centro);
@@ -474,6 +476,14 @@ function vistaEnVivo(){
     nivel.textContent = d.level;
     nivel.style.color = c;
     tarea.textContent = d.task;
+    if (d.task_warning){
+      avisoTarea.textContent = "⚠ " + d.task_warning;
+      avisoTarea.style.display = "inline-block";
+      tarea.style.opacity = ".45";
+    } else {
+      avisoTarea.style.display = "none";
+      tarea.style.opacity = "1";
+    }
 
     comps.innerHTML = "";
     for (const [clave, etiqueta] of Object.entries(NOMBRE_COMP)){
