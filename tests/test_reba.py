@@ -1,0 +1,230 @@
+"""Que el cálculo de REBA respete la norma, y que las tablas no estén mal copiadas.
+
+La prueba que más protege es la de MONOTONÍA. Las tablas de REBA tienen que crecer
+—o al menos no decrecer— en cada uno de sus ejes: empeorar la postura de una
+articulación no puede bajar el puntaje. Es una propiedad de la norma, no una
+suposición, y sirve de detector de erratas: una celda mal transcrita rompe la
+monotonía en su fila o su columna aunque el valor parezca plausible.
+
+    .\\.venv\\Scripts\\python.exe -m tests.test_reba
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.baseline.reba import (  # noqa: E402
+    TABLE_A,
+    TABLE_B,
+    TABLE_C,
+    RebaAssumptions,
+    action_level,
+    lower_arm_score,
+    neck_score,
+    reba_from_keypoints,
+    score_a,
+    score_b,
+    trunk_score,
+    upper_arm_score,
+)
+from src.pose.schema import JOINT, N_JOINTS  # noqa: E402
+
+
+# --- las tablas ---------------------------------------------------------------
+
+
+def test_table_shapes_and_ranges() -> None:
+    assert TABLE_A.shape == (5, 12), f"tabla A: {TABLE_A.shape}"
+    assert TABLE_B.shape == (6, 6), f"tabla B: {TABLE_B.shape}"
+    assert TABLE_C.shape == (12, 12), f"tabla C: {TABLE_C.shape}"
+    assert TABLE_A.min() >= 1 and TABLE_A.max() <= 9
+    assert TABLE_B.min() >= 1 and TABLE_B.max() <= 9
+    assert TABLE_C.min() >= 1 and TABLE_C.max() <= 12
+
+
+def test_table_c_is_monotonic() -> None:
+    """En los dos ejes: un grupo A o B peor no puede dar un REBA menor."""
+    fallos = []
+    for fila in range(TABLE_C.shape[0]):
+        diffs = np.diff(TABLE_C[fila])
+        if (diffs < 0).any():
+            fallos.append(f"fila A={fila + 1} baja: {TABLE_C[fila].tolist()}")
+    for columna in range(TABLE_C.shape[1]):
+        diffs = np.diff(TABLE_C[:, columna])
+        if (diffs < 0).any():
+            fallos.append(f"columna B={columna + 1} baja: {TABLE_C[:, columna].tolist()}")
+    assert not fallos, "tabla C no monótona, posible errata: " + "; ".join(fallos)
+
+
+def test_table_a_is_monotonic_on_every_axis() -> None:
+    """Tronco, cuello y piernas por separado. La tabla viene aplanada, se desdobla."""
+    desdoblada = TABLE_A.reshape(5, 3, 4)  # tronco, cuello, piernas
+    fallos = []
+    for eje, nombre in ((0, "tronco"), (1, "cuello"), (2, "piernas")):
+        diffs = np.diff(desdoblada, axis=eje)
+        if (diffs < 0).any():
+            malos = np.argwhere(diffs < 0)
+            fallos.append(f"{nombre}: {len(malos)} descensos, primero en {malos[0].tolist()}")
+    assert not fallos, "tabla A no monótona, posible errata: " + "; ".join(fallos)
+
+
+def test_table_b_is_monotonic_on_every_axis() -> None:
+    desdoblada = TABLE_B.reshape(6, 2, 3)  # brazo, antebrazo, muñeca
+    fallos = []
+    for eje, nombre in ((0, "brazo"), (1, "antebrazo"), (2, "muñeca")):
+        diffs = np.diff(desdoblada, axis=eje)
+        if (diffs < 0).any():
+            malos = np.argwhere(diffs < 0)
+            fallos.append(f"{nombre}: {len(malos)} descensos, primero en {malos[0].tolist()}")
+    assert not fallos, "tabla B no monótona, posible errata: " + "; ".join(fallos)
+
+
+# --- los umbrales de la norma en sus fronteras -------------------------------
+
+
+def test_component_thresholds() -> None:
+    assert trunk_score(np.array([0.0, 10, 20, 21, 60, 61, 90])).tolist() == [1, 2, 2, 3, 3, 4, 4]
+    assert neck_score(np.array([0.0, 20, 21, 45])).tolist() == [1, 1, 2, 2]
+    assert upper_arm_score(np.array([0.0, 20, 21, 45, 46, 90, 91])).tolist() == [
+        1, 1, 2, 2, 3, 3, 4,
+    ]
+    assert lower_arm_score(np.array([0.0, 59, 60, 100, 101])).tolist() == [2, 2, 1, 1, 2]
+
+
+def test_action_levels_cover_every_score() -> None:
+    for puntaje in range(1, 16):
+        assert action_level(puntaje)
+    for fuera in (0, 16):
+        try:
+            action_level(fuera)
+        except ValueError:
+            continue
+        raise AssertionError(f"aceptó un puntaje imposible: {fuera}")
+
+
+# --- el cálculo completo ------------------------------------------------------
+
+
+def _standing_neutral() -> np.ndarray:
+    """Una persona de pie, erguida, brazos abajo, en coordenadas de imagen."""
+    kp = np.zeros((1, N_JOINTS, 2), dtype=np.float32)
+    kp[0, JOINT["left_hip"]] = (95, 300)
+    kp[0, JOINT["right_hip"]] = (105, 300)
+    kp[0, JOINT["left_shoulder"]] = (95, 200)
+    kp[0, JOINT["right_shoulder"]] = (105, 200)
+    kp[0, JOINT["left_ear"]] = (95, 160)
+    kp[0, JOINT["right_ear"]] = (105, 160)
+    kp[0, JOINT["right_elbow"]] = (105, 260)
+    kp[0, JOINT["right_wrist"]] = (105, 320)
+    kp[0, JOINT["right_knee"]] = (105, 400)
+    kp[0, JOINT["right_ankle"]] = (105, 500)
+    return kp
+
+
+def _bent_over() -> np.ndarray:
+    """Agachado a recoger algo del suelo: tronco casi horizontal, brazo adelantado."""
+    kp = _standing_neutral().copy()
+    kp[0, JOINT["left_shoulder"]] = (170, 290)
+    kp[0, JOINT["right_shoulder"]] = (180, 290)
+    kp[0, JOINT["left_ear"]] = (210, 300)
+    kp[0, JOINT["right_ear"]] = (220, 300)
+    kp[0, JOINT["right_elbow"]] = (190, 350)
+    kp[0, JOINT["right_wrist"]] = (200, 410)
+    kp[0, JOINT["right_knee"]] = (105, 380)
+    kp[0, JOINT["right_ankle"]] = (110, 500)
+    return kp
+
+
+def test_neutral_posture_is_low_risk() -> None:
+    r = reba_from_keypoints(_standing_neutral())
+    assert r["trunk"][0] == 1, f"tronco erguido debería puntuar 1, dio {r['trunk'][0]}"
+    assert action_level(int(r["reba"][0])) in ("despreciable", "bajo"), (
+        f"de pie y neutro dio REBA {r['reba'][0]} ({action_level(int(r['reba'][0]))})"
+    )
+
+
+def test_bent_posture_scores_higher_than_neutral() -> None:
+    neutro = reba_from_keypoints(_standing_neutral())["reba"][0]
+    agachado = reba_from_keypoints(_bent_over())["reba"][0]
+    assert agachado > neutro, (
+        f"agacharse tiene que puntuar más que estar de pie: {agachado} contra {neutro}"
+    )
+
+
+def test_assumptions_can_only_raise_the_score() -> None:
+    """Los valores por defecto son los neutros, así que el puntaje es una cota inferior.
+
+    Si alguna asunción pudiera BAJAR el puntaje, la frase «cota inferior del riesgo
+    real» que este proyecto va a publicar sería falsa.
+    """
+    kp = _bent_over()
+    base = int(reba_from_keypoints(kp)["reba"][0])
+    peores = [
+        RebaAssumptions(wrist=3),
+        RebaAssumptions(trunk_twist=True),
+        RebaAssumptions(neck_twist=True),
+        RebaAssumptions(load_force=2),
+        RebaAssumptions(coupling=3),
+        RebaAssumptions(wrist=3, trunk_twist=True, neck_twist=True, load_force=3, coupling=3),
+    ]
+    for supuesto in peores:
+        puntaje = int(reba_from_keypoints(kp, assumptions=supuesto)["reba"][0])
+        assert puntaje >= base, f"{supuesto} bajó el puntaje de {base} a {puntaje}"
+
+
+def test_absent_frames_get_no_risk_level() -> None:
+    """Sin persona no hay puntaje, y 0 no es un nivel de la norma: no se confunde
+    con riesgo bajo."""
+    kp = np.concatenate([_standing_neutral(), _bent_over()])
+    present = np.array([True, False])
+    r = reba_from_keypoints(kp, present=present)
+    assert r["reba"][1] == 0
+    try:
+        action_level(int(r["reba"][1]))
+    except ValueError:
+        return
+    raise AssertionError("el 0 de un fotograma sin persona pasó por un nivel válido")
+
+
+def test_invalid_assumptions_are_rejected() -> None:
+    for kwargs in ({"wrist": 0}, {"wrist": 4}, {"load_force": -1}, {"coupling": 9}):
+        try:
+            RebaAssumptions(**kwargs)
+        except ValueError:
+            continue
+        raise AssertionError(f"aceptó asunciones imposibles: {kwargs}")
+
+
+def test_score_combination_matches_tables_directly() -> None:
+    """Que los índices de las tablas no estén cruzados, comprobado celda a celda."""
+    for trunk in range(1, 6):
+        for neck in range(1, 4):
+            for legs in range(1, 5):
+                esperado = TABLE_A.reshape(5, 3, 4)[trunk - 1, neck - 1, legs - 1]
+                obtenido = score_a(np.array([trunk]), np.array([neck]), np.array([legs]))[0]
+                assert obtenido == esperado, f"A({trunk},{neck},{legs}): {obtenido} != {esperado}"
+    for arm in range(1, 7):
+        for forearm in range(1, 3):
+            for wrist in range(1, 4):
+                esperado = TABLE_B.reshape(6, 2, 3)[arm - 1, forearm - 1, wrist - 1]
+                obtenido = score_b(np.array([arm]), np.array([forearm]), np.array([wrist]))[0]
+                assert obtenido == esperado, f"B({arm},{forearm},{wrist}): {obtenido} != {esperado}"
+
+
+if __name__ == "__main__":
+    pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    fallos = 0
+    for prueba in pruebas:
+        try:
+            prueba()
+            print(f"  ok   {prueba.__name__}")
+        except AssertionError as e:
+            fallos += 1
+            print(f"  FALLA {prueba.__name__}: {e}")
+    print(f"\n{len(pruebas) - fallos}/{len(pruebas)}")
+    sys.exit(1 if fallos else 0)
