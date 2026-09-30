@@ -219,6 +219,66 @@ a ojo, y el F1 macro pasa de 0,674 a 0,673. **Calibrar no cambió nada, y ahora 
 sabe en vez de suponerse.** La desviación del umbral entre pliegues es de 2,2°, o
 sea que las reglas no dependen de a quién le tocó entrenar.
 
+### EL TCN, MEDIDO (2026-09-30)
+
+4 pliegues de validación cruzada por sujeto, 10 Hz, ventana causal de 2 s, 30
+épocas, **78.095 parámetros**, 16–19 segundos de entrenamiento por pliegue en la
+RTX 3050. Reservado sin tocar. Artefacto `artifacts/tcn-20260930.json`.
+
+| campo | degenerado | reglas | **TCN** | rango TCN |
+|---|---|---|---|---|
+| movimiento | 0,288 | 0,670 | **0,870** | 0,829–0,882 |
+| altura de trabajo | 0,174 | 0,639 | **0,798** | 0,765–0,823 |
+| **manipulación** | 0,114 | 0,046 | **0,741** | 0,650–0,788 |
+| objeto | 0,195 | 0,123 | **0,784** | 0,738–0,812 |
+| etiqueta completa | 0,013 | 0,011 | **0,621** | 0,560–0,663 |
+
+**El modelo gana donde estaba previsto que ganara, y esa es la tesis del proyecto
+convertida en número.** En `manipulación` —distinguir recoger de colocar, que son
+el mismo gesto en dos sentidos y un fotograma no puede separar— pasa de 0,114 a
+**0,741**. Las reglas ahí sacan 0,046 porque ni lo intentan, y está dicho en su
+código desde antes de medir.
+
+Los rangos son estrechos, así que el resultado no depende de qué cuatro
+participantes cayeron en la prueba.
+
+**Lo que se hizo para que la comparación valga**, y sin lo cual estos números no
+significarían nada:
+
+  · **Los tres brazos predicen exactamente los mismos fotogramas.** El modelo
+    necesita 2 s de pasado, así que no puede predecir los primeros 20 fotogramas
+    de cada sujeto; si las reglas los hubieran predicho y el modelo no, la
+    diferencia incluiría esa diferencia de material — y esos primeros fotogramas
+    son los fáciles, la persona entrando en escena y colocándose. El arnés
+    rechaza con error a un brazo que devuelva de más o de menos.
+  · **La red es causal**: cada convolución solo mira hacia atrás. Una que mirara
+    el futuro daría mejores números y no se podría instalar.
+  · **Las reglas se calibran en entrenamiento**, para que la línea base no salga
+    débil por descuido y le regale ventaja al modelo.
+
+#### La alarma del campo `object`, comprobada y descartada
+
+Esta guía tenía escrito **antes de medir** que si el modelo acertaba el objeto
+—caja o varilla, que no está en un esqueleto— la primera hipótesis no debía ser
+que hubiera aprendido a verlo, sino que hubiera memorizado el orden del guion del
+experimento. Sacó 0,784, así que tocaba comprobarlo.
+
+Medido en los datos crudos, sin ningún modelo de por medio
+(`scripts/probe_object_leak.py`), la separación entre las muñecas normalizada por
+la altura del cuerpo:
+
+| objeto | mediana | n |
+|---|---|---|
+| caja | **0,105** (manos juntas) | 11.352 |
+| varilla | **0,237** (manos separadas) | 9.798 |
+
+**La señal está en la postura: el modelo lee cómo se agarra, no qué se agarra.**
+Una varilla larga se coge con las manos separadas a lo largo de ella y una caja
+con las manos a los lados. Para un sistema de ergonomía eso es exactamente lo que
+interesa. No es una prueba cerrada —el solapamiento intercuartílico es del 44% y
+es una sola característica— pero basta para no tratar el resultado como
+sospechoso. De paso corrigió una predicción mía, que era la contraria.
+
 ### Fase 3 — Los modelos, que entrenas tú
 
 | quién | qué |
