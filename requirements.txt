@@ -12,4 +12,5 @@ scikit-learn==1.5.*
 pandas==2.2.*
 matplotlib==3.9.*
 tqdm==4.66.*
+h5py==3.16.*
 pytest==8.3.*

@@ -39,12 +39,78 @@ data/
 el puntaje ergonómico de un levantamiento real, y son 20 sujetos distintos, que
 es lo que permite partir por persona y no por clip.
 
-**Lo que hay que verificar al descargarlo, y no dar por hecho:** varios trabajos
-que usan este dataset afirman que trae anotaciones de riesgo **REBA a nivel de
-fotograma**. La ficha oficial solo confirma las 17 etiquetas de acción. Si las
-anotaciones REBA no vienen, el puntaje se calcula de los ángulos del esqueleto
-—que es el plan de todas formas— y las etiquetas de acción sirven para la parte
-que entrena el modelo.
+### LO QUE HAY DE VERDAD DENTRO (verificado el 2026-09-29)
+
+Descargado y abierto. La estructura real es:
+
+```
+xwzzkxtf9s-2/UW IOM Dataset/
+  JointPositions/   1.mat … 20.mat     15 MB    esqueletos
+  VideoLabels/      01.txt … 20.txt   756 KB    etiquetas, una por fotograma
+  Videos/           01.7z … 20.7z     8,5 GB    los vídeos, SIN descomprimir
+```
+
+**Ojo al emparejar: los esqueletos van sin cero (`1.mat`) y las etiquetas con cero
+(`02.txt`).** Ordenar alfabéticamente pone `10.mat` antes de `2.mat`, y emparejar
+el esqueleto del sujeto 10 con las etiquetas del 2 no da ningún error: da un
+dataset mezclado que rinde mal sin decir por qué.
+
+Cada `.mat` es MATLAB v7.3, o sea HDF5: se lee con `h5py`, no con `scipy.io`.
+Contiene cuatro cosas, y hay más de lo prometido:
+
+| campo | forma | qué es |
+|---|---|---|
+| `bodylogger3D` | (T, 25, 3) | esqueleto **3D** del Kinect, 25 articulaciones, en metros |
+| `pos2Dcolor` | (T, 25, 2) | las mismas articulaciones proyectadas sobre la imagen de color |
+| `bodytimelogger` | (T, 1) | marca de tiempo de cada esqueleto |
+| `videotimelogger` | (Tv, 1) | marca de tiempo de cada fotograma de vídeo |
+
+El orden de articulaciones es el del SDK del **Kinect v2** (0 = base de la
+columna, 20 = columna a la altura de los hombros). No está documentado en el
+dataset: se comprobó midiendo la inclinación del tronco, que da p50 de 8,1° y p95
+de 69,1° en el sujeto 1 —erguido de pie, doblado al doblarse—, que es lo que
+tendría que salir si el orden es el supuesto.
+
+**Las etiquetas son las 17 de acción, NO son puntajes REBA.** Varios trabajos que
+usan este dataset hablan de anotaciones REBA por fotograma y aquí no vienen. El
+formato es una línea por fotograma con cuatro campos separados por guiones bajos:
+
+```
+objeto _ movimiento _ manipulación _ altura
+box|rod|none _ walk|stand|bend _ pick-up|place|hold|reach|none _ low|mid|top|none
+```
+
+El puntaje de riesgo se calcula de los ángulos del esqueleto, que era el plan de
+todas formas, y estas etiquetas son lo que aprende el modelo.
+
+### Los dos hallazgos que cambian el diseño
+
+**1. El fps real va de 7,81 a 10,58 y cambia con cada sujeto.** La ficha dice unos
+12. Medido de `videotimelogger` en los 20 sujetos. Consecuencia: una ventana de 30
+fotogramas son 3,8 s en el sujeto 20 y 2,8 s en el sujeto 9, así que **las
+ventanas temporales se definen en segundos y se remuestrea**; definirlas en
+fotogramas convierte al sujeto en una variable oculta del experimento.
+
+**2. Las etiquetas están alineadas al FINAL de la secuencia.** Hay entre 28 y 109
+etiquetas menos que fotogramas de esqueleto, y el hueco está al principio. No se
+supuso: se midió con `scripts/probe_alignment.py`, comparando cuánto más inclinado
+está el tronco en los fotogramas `bend` que en los `stand` bajo cada hipótesis.
+
+| hipótesis | separación, mediana de 20 sujetos |
+|---|---|
+| etiquetas desde el primer fotograma | 4,11° |
+| **etiquetas alineadas al final** | **21,75°** |
+| por marca de tiempo, desde el principio | 1,24° |
+| por marca de tiempo, al final | 21,75° |
+
+Gana alinear al final, y en 18 de 20 sujetos por separado. El mapeo por marca de
+tiempo da **el mismo resultado exacto** que el directo, así que los dos relojes ya
+van alineados y el adaptador no necesita interpolar por tiempo.
+
+**El sujeto 3 es la excepción y queda marcado como sospechoso:** da −2,67°, o sea
+que sus fotogramas `bend` salen *menos* inclinados que los `stand`, que es
+imposible con la alineación correcta. Qué hacer con él es una decisión de criterio
+sin tomar; lo que no se hace es meterlo en el conjunto como si nada.
 
 ### Cómo dejarlo
 
