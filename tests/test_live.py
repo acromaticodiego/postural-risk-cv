@@ -1,0 +1,151 @@
+"""El modo en vivo, comprobado sin necesitar a nadie delante de la cámara.
+
+Lo que no se puede probar aquí es que la webcam dé imagen y que YOLO encuentre a la
+persona: eso se comprobó a mano (la cámara abre y el bucle corre a 74 ms por
+fotograma, 13 fps, con los 10 Hz que pide el modelo de sobra). Todo lo demás —el
+puntaje, la predicción de la tarea, el cierre de eventos y el aviso de que el
+modelo necesita contexto— sí, alimentando la sesión con esqueletos reales del
+dataset.
+
+    .\\.venv\\Scripts\\python.exe -m tests.test_live
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.eval.harness import load  # noqa: E402
+from src.live.session import TARGET_HZ, LiveSession  # noqa: E402
+from src.product.workstation import WorkstationConfig  # noqa: E402
+
+MODELO = Path(__file__).resolve().parents[1] / "artifacts/modelo"
+
+
+def _sesion(**kwargs):
+    config = WorkstationConfig(id="PRUEBA", name="Prueba", **kwargs)
+    return LiveSession(config, camera=None)
+
+
+def _caja(keypoints: np.ndarray) -> np.ndarray:
+    xs, ys = keypoints[:, 0], keypoints[:, 1]
+    return np.array([xs.min(), ys.min(), xs.max(), ys.max()])
+
+
+def test_model_is_trained_and_matches_the_session_rate() -> None:
+    """El modelo se entrenó a 10 Hz y la sesión procesa a 10 Hz.
+
+    Si alguien subiera la tasa de proceso para que el vídeo se viera más fluido, el
+    modelo recibiría el gesto acelerado y empeoraría sin dar ningún error. Por eso
+    la sesión se niega a arrancar si las dos no coinciden.
+    """
+    assert (MODELO / "tcn.pt").exists(), "falta el modelo: scripts/train_production_model.py"
+    s = _sesion()
+    assert abs(s.hz - TARGET_HZ) < 1e-6
+    assert s.window_frames == int(round(2.0 * TARGET_HZ))
+
+
+def test_no_task_is_invented_before_there_is_context() -> None:
+    """Con menos de dos segundos de historia, el sistema dice que espera.
+
+    Contestar una tarea con media ventana daría una etiqueta plausible sacada de un
+    contexto que el modelo nunca vio en entrenamiento.
+    """
+    s = _sesion()
+    sujeto = load(1)
+    puntos = sujeto.keypoints[sujeto.evaluable]
+    for i in range(s.window_frames - 1):
+        estado = s.step(feed=(puntos[i], _caja(puntos[i])))
+    assert estado["task"] == "esperando contexto", estado["task"]
+
+    estado = s.step(feed=(puntos[s.window_frames - 1], _caja(puntos[s.window_frames - 1])))
+    assert estado["task"] != "esperando contexto", "con la ventana llena ya debería predecir"
+    assert estado["task"].count("/") == 2, f"formato de tarea inesperado: {estado['task']}"
+
+
+def test_losing_the_person_clears_the_context() -> None:
+    """Si la persona sale de cuadro, la ventana se vacía.
+
+    Mantenerla pegaría el final de una intervención con el principio de la
+    siguiente y el modelo vería un movimiento que no ocurrió.
+    """
+    s = _sesion()
+    sujeto = load(1)
+    puntos = sujeto.keypoints[sujeto.evaluable]
+    for i in range(s.window_frames):
+        s.step(feed=(puntos[i], _caja(puntos[i])))
+    assert len(s.buffer) == s.window_frames
+
+    estado = s.step(feed=(None, None))
+    assert estado["present"] is False and estado["reba"] == 0
+    assert len(s.buffer) == 0, "la ventana tenía que vaciarse al perder a la persona"
+    assert estado["task"] == "—"
+
+
+def test_a_sustained_risk_closes_an_event_and_a_brief_one_does_not() -> None:
+    """Es la misma regla del modo por lotes, pero cerrando en caliente."""
+    s = _sesion(load_kg=18, coupling="poor")
+    sujeto = load(1)
+    puntos = sujeto.keypoints[sujeto.evaluable]
+
+    # Se busca una postura que en este puesto puntúe por encima del umbral, y se
+    # sostiene más de un segundo.
+    peligrosa = None
+    for p in puntos:
+        estado = s.step(feed=(p, _caja(p)))
+        if estado["reba"] >= s.config.risk_threshold:
+            peligrosa = p
+            break
+    assert peligrosa is not None, "ninguna postura del sujeto superó el umbral"
+
+    antes = len(s.events)
+    for _ in range(int(TARGET_HZ * 1.5)):
+        s.step(feed=(peligrosa, _caja(peligrosa)))
+    assert len(s.events) == antes, "el evento no se cierra mientras dura"
+
+    segura = min(puntos, key=lambda p: s.step(feed=(p, _caja(p)))["reba"])
+    for _ in range(3):
+        s.step(feed=(segura, _caja(segura)))
+    assert len(s.events) > antes, "al bajar el riesgo tenía que cerrarse el evento"
+
+    evento = s.events[-1]
+    assert evento.duration_seconds >= s.config.min_event_seconds
+    assert evento.peak_reba >= s.config.risk_threshold
+    assert evento.dominant_component
+
+
+def test_skeleton_sent_to_the_browser_is_in_canvas_range() -> None:
+    s = _sesion()
+    sujeto = load(1)
+    p = sujeto.keypoints[sujeto.evaluable][0]
+    estado = s.step(feed=(p, _caja(p)))
+    for x, y in estado["skeleton"]:
+        assert -0.2 <= x <= 1.2 and -0.2 <= y <= 1.2, f"punto fuera del lienzo: ({x}, {y})"
+
+
+def test_live_payload_has_no_image_unless_preview_is_asked() -> None:
+    """La imagen solo viaja cuando se pide la vista de instalación, y aun así es
+    efímera: ningún camino del código la escribe en disco."""
+    s = _sesion()
+    sujeto = load(1)
+    p = sujeto.keypoints[sujeto.evaluable][0]
+    estado = s.step(feed=(p, _caja(p)))
+    assert "preview" not in estado
+
+
+if __name__ == "__main__":
+    pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    fallos = 0
+    for prueba in pruebas:
+        try:
+            prueba()
+            print(f"  ok   {prueba.__name__}")
+        except AssertionError as e:
+            fallos += 1
+            print(f"  FALLA {prueba.__name__}: {e}")
+    print(f"\n{len(pruebas) - fallos}/{len(pruebas)}")
+    sys.exit(1 if fallos else 0)

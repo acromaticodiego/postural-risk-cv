@@ -94,11 +94,37 @@ input[type=range]{flex:1;accent-color:var(--acento)}
 .grande{font-size:44px;font-weight:600;line-height:1}
 .nivel{font-size:13px;letter-spacing:1px;text-transform:uppercase}
 .vacio{color:var(--suave);padding:40px;text-align:center}
+
+.enlace-vivo{border:1px solid var(--borde);border-radius:999px;padding:5px 16px;
+  font-size:12px;color:var(--n5)}
+.enlace-vivo:hover{border-color:var(--n5)}
+
+/* Modo en vivo: las dos vistas, una al lado de la otra. Es el argumento del
+   proyecto hecho pantalla — a la izquierda lo que la cámara capta, a la derecha lo
+   único que sale del dispositivo. */
+.dos-vistas{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.caja-vista{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+  padding:14px;position:relative}
+.caja-vista h3{font-size:12px;letter-spacing:.8px;text-transform:uppercase;
+  color:var(--tenue);margin-bottom:10px}
+.caja-vista .nota{font-size:11px;color:var(--suave);margin-top:10px;min-height:28px}
+.caja-vista img{width:100%;border-radius:8px;display:block;background:var(--fondo)}
+.sello{position:absolute;top:14px;right:14px;font-size:10px;letter-spacing:.6px;
+  text-transform:uppercase;border-radius:999px;padding:3px 10px}
+.sello.efimero{color:var(--n3);border:1px solid rgba(232,178,58,.4)}
+.sello.guardado{color:var(--n1);border:1px solid rgba(125,191,110,.4)}
+
+.tira{display:grid;grid-template-columns:auto 1fr;gap:26px;align-items:center;
+  background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+  padding:18px 22px;margin-top:16px}
+.tarea-viva{font-family:ui-monospace,Consolas,monospace;font-size:16px}
+.etiqueta{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--tenue)}
 </style>
 </head>
 <body>
 <header>
   <div class="marca">Riesgo postural <span>por visión</span></div>
+  <button class="enlace-vivo" id="btn-vivo">● Modo en vivo</button>
   <div class="privacidad">Reconstruido de articulaciones · <b>no se guarda ninguna imagen</b></div>
 </header>
 
@@ -124,6 +150,7 @@ const el = (t, p={}) => Object.assign(document.createElement(t), p);
 // --- navegación ------------------------------------------------------------
 function ir(vista, ...args){
   if (animacion) { cancelAnimationFrame(animacion); animacion = null; }
+  cerrarSocket();   // salir del modo en vivo suelta la camara
   const migas = document.getElementById("migas");
   migas.innerHTML = "";
   if (vista !== "inicio") {
@@ -339,6 +366,153 @@ function vistaEvento(p, e){
   pinta();
   animacion = requestAnimationFrame(bucle);
 }
+
+// --- pantalla 4: el sistema funcionando en vivo ----------------------------
+let socket = null;
+
+function cerrarSocket(){
+  if (socket) { socket.onclose = null; socket.close(); socket = null; }
+}
+
+function vistaEnVivo(){
+  cerrarSocket();
+  if (animacion) { cancelAnimationFrame(animacion); animacion = null; }
+  const migas = document.getElementById("migas");
+  migas.innerHTML = "";
+  const atras = el("button",{textContent:"Puestos de trabajo"});
+  atras.onclick = () => { cerrarSocket(); ir("inicio"); };
+  migas.append(atras, el("span",{textContent:"› En vivo"}));
+
+  const v = document.getElementById("vista");
+  v.innerHTML = "";
+  v.append(el("div",{className:"titulo",innerHTML:"<h2>Cámara en vivo</h2>"}),
+           el("div",{className:"sub",id:"estado-vivo",textContent:"Conectando con la cámara…"}));
+
+  const dos = el("div",{className:"dos-vistas"});
+  const izq = el("div",{className:"caja-vista",innerHTML:
+    `<h3>Lo que capta la cámara</h3><div class="sello efimero">efímero</div>`});
+  const img = el("img");
+  izq.append(img, el("div",{className:"nota",textContent:
+    "Vista de instalación: sirve para encuadrar la cámara el día del montaje. Esta imagen no se escribe en disco ni sale del equipo."}));
+
+  const der = el("div",{className:"caja-vista",innerHTML:
+    `<h3>Lo único que sale del dispositivo</h3><div class="sello guardado">se conserva</div>`});
+  const lienzo = el("canvas",{width:480,height:360});
+  lienzo.style.width = "100%";
+  der.append(lienzo, el("div",{className:"nota",textContent:
+    "Articulaciones y puntajes. Con esto se reconstruye el incidente meses después, y no hay ninguna cara que proteger."}));
+
+  dos.append(izq, der);
+  v.append(dos);
+
+  const tira = el("div",{className:"tira"});
+  const marcador = el("div");
+  const puntaje = el("div",{className:"grande"});
+  const nivel = el("div",{className:"nivel"});
+  marcador.append(puntaje, nivel);
+  const centro = el("div");
+  centro.append(el("div",{className:"etiqueta",textContent:"Tarea reconocida"}));
+  const tarea = el("div",{className:"tarea-viva",textContent:"—"});
+  const comps = el("div",{style:"margin-top:14px;max-width:420px"});
+  centro.append(tarea, comps);
+  tira.append(marcador, centro);
+  v.append(tira);
+
+  const listaEventos = el("div",{style:"margin-top:22px"});
+  v.append(el("div",{className:"titulo",style:"margin-top:26px",
+             innerHTML:"<h2>Eventos detectados</h2>"}),
+           el("div",{className:"sub",id:"conteo-eventos",
+             textContent:"Ninguno todavía. Aparecen cuando una postura de riesgo se sostiene un segundo."}),
+           listaEventos);
+
+  const ctx = lienzo.getContext("2d");
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  socket = new WebSocket(`${proto}://${location.host}/ws/live`);
+  socket.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    if (d.error){
+      document.getElementById("estado-vivo").textContent = "Error: " + d.error;
+      return;
+    }
+    document.getElementById("estado-vivo").textContent =
+      `${d.workstation} · umbral REBA ${d.threshold} · ${d.seconds.toFixed(0)} s procesados` +
+      (d.configured ? "" : " · puesto sin configurar: el riesgo real es mayor");
+
+    if (d.preview) img.src = "data:image/jpeg;base64," + d.preview;
+
+    const c = d.present ? color(d.level) : css("--tenue");
+    ctx.fillStyle = css("--fondo");
+    ctx.fillRect(0,0,lienzo.width,lienzo.height);
+    ctx.strokeStyle = css("--borde"); ctx.lineWidth = 1;
+    for (let g = 0; g <= lienzo.width; g += 48){
+      ctx.beginPath(); ctx.moveTo(g,0); ctx.lineTo(g,lienzo.height); ctx.stroke(); }
+    for (let g = 0; g <= lienzo.height; g += 48){
+      ctx.beginPath(); ctx.moveTo(0,g); ctx.lineTo(lienzo.width,g); ctx.stroke(); }
+
+    if (d.skeleton){
+      const escala = Math.min(lienzo.width, lienzo.height);
+      const dx = (lienzo.width - escala)/2, dy = (lienzo.height - escala)/2;
+      const X = k => d.skeleton[k][0]*escala + dx, Y = k => d.skeleton[k][1]*escala + dy;
+      ctx.strokeStyle = c; ctx.lineWidth = 4; ctx.lineCap = "round";
+      for (const [a,b] of HUESOS){
+        if ((d.skeleton[a][0]===0&&d.skeleton[a][1]===0) ||
+            (d.skeleton[b][0]===0&&d.skeleton[b][1]===0)) continue;
+        ctx.beginPath(); ctx.moveTo(X(a),Y(a)); ctx.lineTo(X(b),Y(b)); ctx.stroke();
+      }
+      ctx.fillStyle = c;
+      for (let k = 0; k < d.skeleton.length; k++){
+        if (d.skeleton[k][0]===0 && d.skeleton[k][1]===0) continue;
+        ctx.beginPath(); ctx.arc(X(k),Y(k),4,0,7); ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = css("--suave"); ctx.font = "14px system-ui";
+      ctx.fillText("sin persona en cuadro", 20, lienzo.height - 20);
+    }
+
+    puntaje.textContent = d.present ? d.reba : "—";
+    puntaje.style.color = c;
+    nivel.textContent = d.level;
+    nivel.style.color = c;
+    tarea.textContent = d.task;
+
+    comps.innerHTML = "";
+    for (const [clave, etiqueta] of Object.entries(NOMBRE_COMP)){
+      const valor = d.components[clave] || 0;
+      const fila = el("div",{className:"comp"});
+      fila.innerHTML = `<span>${etiqueta}</span>
+        <span class="medidor"><i style="width:${100*Math.min(valor/MAX_COMP[clave],1)}%;
+          background:${valor/MAX_COMP[clave] >= .75 ? css("--n4") : css("--n3")}"></i></span>
+        <span>${valor}</span>`;
+      comps.append(fila);
+    }
+
+    if (d.total_events){
+      document.getElementById("conteo-eventos").textContent =
+        `${d.total_events} eventos. Se muestran los últimos.`;
+      listaEventos.innerHTML = "";
+      for (const e of [...d.events].reverse()){
+        const fila = el("div",{className:"evento"});
+        fila.append(el("div",{className:"punto",textContent:e.peak_reba,
+          style:`background:${color(e.peak_level)}`}));
+        fila.append(el("div",{innerHTML:
+          `<div class="tarea">${e.task}</div>
+           <div class="meta">t+${e.start_seconds}s · ${e.duration_seconds}s ·
+            causa: ${NOMBRE_COMP[e.dominant_component] || e.dominant_component}</div>`}));
+        listaEventos.append(fila);
+      }
+    }
+  };
+  socket.onerror = () => {
+    document.getElementById("estado-vivo").textContent =
+      "No se pudo abrir la cámara. ¿Está conectada y libre?";
+  };
+  socket.onclose = () => {
+    const e = document.getElementById("estado-vivo");
+    if (e && !e.textContent.startsWith("Error")) e.textContent += " · conexión cerrada";
+  };
+}
+
+document.getElementById("btn-vivo").onclick = vistaEnVivo;
 
 fetch("/api/panel").then(r => r.json()).then(d => { PANEL = d; ir("inicio"); })
   .catch(() => document.getElementById("vista").innerHTML =

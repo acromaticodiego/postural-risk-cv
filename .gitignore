@@ -26,3 +26,6 @@ data/keypoints/
 
 # La demo del panel: datos generados, no van al repositorio.
 artifacts/demo/
+
+# El modelo entrenado es un artefacto de una corrida, no codigo.
+artifacts/modelo/
