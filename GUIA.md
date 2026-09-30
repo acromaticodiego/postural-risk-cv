@@ -11,10 +11,21 @@ aplicación, y mantiene esta guía diciendo explícitamente qué toca hacer.
 
 ## LO QUE TIENES QUE HACER AHORA
 
-**Descargar el dataset UW-IOM.** Instrucciones exactas en `data/README.md`.
-Es lo único que bloquea todo lo demás, y no hay que grabar nada todavía.
+El dataset ya está descargado y verificado. Lo que bloquea ahora son **tres
+decisiones de criterio que son tuyas**, y hay que tomarlas antes de ver cualquier
+resultado para no ajustar la vara:
 
-Mientras descarga, Claude escribe el extractor de keypoints y la línea base REBA.
+1. **¿A partir de qué puntaje REBA cuenta como exposición de riesgo?** La norma
+   da niveles (1 despreciable, 2–3 bajo, 4–7 medio, 8–10 alto, 11+ muy alto).
+   Elegir dónde salta el contador es una decisión de producto, no de la norma.
+2. **¿Cuánto tiene que durar una postura para contar?** Sin un mínimo, cada gesto
+   de paso al agacharse cuenta como exposición y el informe se llena de ruido.
+3. **¿Qué le cuesta más al cliente: perder una exposición real o levantar una
+   falsa alarma?** Eso decide hacia dónde se inclina el sistema, y es lo que
+   convierte una curva de precisión y recall en un punto de operación.
+
+Mientras las piensas, Claude extrae los esqueletos de los 20 sujetos y monta el
+cálculo de REBA geométrico.
 
 ---
 
