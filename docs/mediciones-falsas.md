@@ -133,6 +133,42 @@ después.
 
 ---
 
+## 4. «REBA no distingue las dos técnicas de levantar»: generalicé de un caso (2026-09-30)
+
+**Qué se creía.** Que REBA es incapaz de separar levantar con la espalda doblada
+de levantar con las rodillas dobladas, y que por eso hacía falta añadir la ecuación
+NIOSH. La evidencia parecía sólida: calculadas las dos posturas, REBA daba **7
+contra 6**, un solo punto de diferencia, y había una explicación mecánica
+convincente —al agacharse bien, la norma *sube* el puntaje de piernas casi tanto
+como baja el del tronco—.
+
+**Qué pasaba.** El par de posturas que comparé tenía las manos **en el mismo
+sitio**, así que lo único que cambiaba era el reparto de la flexión entre tronco y
+rodillas. Pero en un levantamiento real las dos cosas van juntas: doblar las
+rodillas te permite **acercarte a la carga**, y doblar la espalda te obliga a
+alejarla. Medido sobre ese caso, el de verdad, REBA sube de **3 a 6** al alejar las
+manos, porque también se inclina el tronco y se eleva el brazo. REBA sí lo ve.
+
+**Cómo se destapó.** Por una prueba escrita para justificar el módulo nuevo:
+`test_reba_barely_moves_between_the_same_two_lifts`, que afirmaba que REBA no
+separa las dos técnicas. Falló a la primera. **La prueba estaba bien y la
+afirmación estaba mal**, que es el orden correcto en que conviene que pasen las
+cosas.
+
+**Lo que sobrevive, y es lo que justifica NIOSH de verdad:** un resultado en
+kilogramos —cuánto debería pesar la carga para que ese levantamiento fuera
+aceptable—, un umbral que incorpora el peso real en vez de un ajuste de 0 a 3, y el
+modelado de la frecuencia y el recorrido. Todo eso es cierto y comprobado; lo que
+no era cierto es el argumento con el que llegué.
+
+**La lección.** El ejemplo con el que uno se convence casi nunca es el caso
+general, y cuanto mejor sea la explicación mecánica que lo acompaña, menos ganas
+dan de comprobarlo. Aquí la explicación —«la norma sube las piernas»— era
+verdadera, y la conclusión que sostenía era falsa igualmente: era verdad **en ese
+par de posturas**, y ese par no ocurre en una planta.
+
+---
+
 ## Sustos que se comprobaron y NO eran falsos
 
 No todo lo sospechoso está mal, y anotar las falsas alarmas evita desconfiar de
