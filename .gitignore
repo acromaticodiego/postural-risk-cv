@@ -29,3 +29,6 @@ artifacts/demo/
 
 # El modelo entrenado es un artefacto de una corrida, no codigo.
 artifacts/modelo/
+
+# Los pesos entrenados son artefactos de una corrida, no codigo.
+artifacts/modelo/

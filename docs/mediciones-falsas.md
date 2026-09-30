@@ -169,6 +169,45 @@ par de posturas**, y ese par no ocurre en una planta.
 
 ---
 
+## 5. Una comprobación cuyo resultado tenía dos causas indistinguibles (2026-09-30)
+
+**Qué se creía.** Que `probe_load_detector.py` respondería si un detector entrenado
+con cajas de almacén reconoce cajas **en las manos de una persona**. Era la pregunta
+que decidía si merecía la pena añadir la detección de carga, y la sonda se escribió
+antes de entrenar nada, con su criterio por delante.
+
+**Qué salió.** En la validación del propio dataset, 59 de 60 imágenes con caja
+detectada y confianza mediana 0,91. En el vídeo de una persona manipulando algo,
+**0 de 89**. Bajando el umbral de confianza a 0,10, seguían siendo 0.
+
+Con esos números la conclusión se escribe sola: el modelo no generaliza.
+
+**Qué pasaba.** Al mirar el fotograma —no la cifra, la imagen— lo que la persona
+sostenía era **un organizador de plástico transparente con cajones**. El dataset son
+cajas de **cartón** de almacén: marrones, opacas, cerradas. Así que el 0% tenía dos
+explicaciones que ese material no puede separar:
+
+  · que el modelo no generalice a cajas en las manos, que es lo que se quería medir;
+  · o que sencillamente **no hubiera ninguna caja de cartón que detectar**, en cuyo
+    caso no detectar nada es lo CORRECTO, y detectar algo habría sido un falso
+    positivo con suerte.
+
+**La sonda no estaba rota**: contaba bien lo que contaba. Lo que fallaba es que su
+resultado no distinguía entre «el modelo falla» y «aquí no hay nada que detectar»,
+y las dos llevan al mismo número.
+
+**La lección**, que es la tercera vez que aparece en este proyecto con otra cara:
+**el material de una comprobación tiene que ejercitar la condición que se quiere
+medir**, y conviene preguntarse, antes de correrla, qué OTRAS causas podrían
+producir el mismo resultado. Aquí se vio a tiempo por mirar la imagen en vez de
+quedarse en la tabla — lo mismo que destapó la medición falsa nº 3.
+
+Lo que queda: la sonda avisa en su propia salida de que un 0% sin cajas en el
+material significa «no se sabe», no «no funciona». Y la respuesta sigue **abierta**,
+a la espera de una grabación con una caja de cartón de verdad.
+
+---
+
 ## Sustos que se comprobaron y NO eran falsos
 
 No todo lo sospechoso está mal, y anotar las falsas alarmas evita desconfiar de

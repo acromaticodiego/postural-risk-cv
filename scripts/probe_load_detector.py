@@ -163,6 +163,16 @@ def main() -> None:
             "el modelo no generaliza a cajas en las manos y hay que decirlo en vez de "
             "meterlo igual. Lo que decide es la tercera cifra, no la primera."
         )
+        print(
+            "\nANTES DE CONCLUIR NADA, MIRAR EL VIDEO. Un 0% tiene DOS causas que estas\n"
+            "cifras no separan: que el modelo no generalice, o que en el material no\n"
+            "haya ninguna caja de carton que detectar. La primera vez que se corrio\n"
+            "esto (30/09) dio 0 de 89 y la causa era la segunda: el objeto sostenido\n"
+            "era un organizador de plastico transparente, y no detectarlo era lo\n"
+            "correcto. El dataset son cajas de CARTON de almacen, opacas y cerradas.\n"
+            "\nPara que esta sonda concluya algo hace falta material con cajas de carton\n"
+            "en las manos. Si no lo hay, el resultado es 'no se sabe', no 'no funciona'."
+        )
 
 
 if __name__ == "__main__":
