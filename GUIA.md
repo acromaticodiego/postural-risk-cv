@@ -279,6 +279,40 @@ interesa. No es una prueba cerrada —el solapamiento intercuartílico es del 44
 es una sola característica— pero basta para no tratar el resultado como
 sospechoso. De paso corrigió una predicción mía, que era la contraria.
 
+### EL INFORME POR TAREAS, Y LA PREGUNTA QUE DECIDE SI EL MODELO SIRVE (2026-09-30)
+
+Las dos mitades juntas: REBA dice cuánto riesgo hay, el modelo dice de qué tarea
+viene. Por separado no se puede accionar ninguna de las dos.
+
+**Y de ahí sale la medida que importa para el cliente, que no es el F1:** el
+informe se genera dos veces sobre los mismos sujetos, una con las etiquetas
+verdaderas y otra con lo que predice el modelo. El riesgo total es idéntico —REBA
+se calcula de la geometría— así que lo único que puede cambiar es la atribución.
+
+| | resultado (pliegue 1, puesto configurado con 12 kg y agarre regular) |
+|---|---|
+| la tarea número 1 coincide | **sí** |
+| de las 3 peores, coinciden | **3 de 3** |
+| riesgo atribuido a la peor tarea | 26% real contra **23%** del modelo |
+
+**Un modelo con 0,741 de F1 lleva a la misma decisión que la verdad.** Para este
+producto eso es suficiente: el jefe de planta interviene en el mismo sitio. Y es
+un criterio de aceptación mucho más honesto que un umbral de F1 elegido a ojo.
+
+#### El hallazgo que justifica el informe entero
+
+| tarea | REBA | tiempo | % del riesgo |
+|---|---|---|---|
+| `bend / place / low` (agacharse al suelo) | **9**, el más alto | 0,6 min | 9% |
+| `stand / place / mid` (colocar a media altura) | 4 | 3,1 min | **26%** |
+
+**La tarea más peligrosa no es la que más daño acumula.** Quien mirara solo el
+pico de REBA mandaría a rediseñar el agacharse, y el 26% del problema está en una
+tarea de riesgo moderado que dura cinco veces más. Eso solo aparece cruzando
+severidad con duración y atribuyéndolo a tareas, y tiene su prueba: si el informe
+ordenara por severidad en vez de por riesgo acumulado, caería
+`test_long_moderate_task_outranks_short_severe_one`.
+
 ### Fase 3 — Los modelos, que entrenas tú
 
 | quién | qué |
