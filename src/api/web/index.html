@@ -481,6 +481,9 @@ function vistaEnVivo(){
   tira.append(marcador, centro);
   v.append(tira);
 
+  const consejo = el("div",{className:"recomendacion",style:"display:none"});
+  v.append(consejo);
+
   const nioshVivo = el("div");
   v.append(nioshVivo);
 
@@ -570,6 +573,17 @@ function vistaEnVivo(){
       avisoVista.style.display = "inline-block";
     } else {
       avisoVista.style.display = "none";
+    }
+
+    if (d.technique && d.technique.code !== "neutra"){
+      const evitable = d.technique.avoidable;
+      consejo.style.display = "block";
+      consejo.style.borderLeftColor = evitable ? css("--n4") : css("--n1");
+      consejo.innerHTML =
+        `<h3>${evitable ? "Se puede evitar" : "Es el mínimo de esta tarea"}</h3>` +
+        d.technique.message;
+    } else {
+      consejo.style.display = "none";
     }
 
     const ultimoLift = [...d.events].reverse().find(e => e.niosh);

@@ -35,6 +35,7 @@ import torch
 
 from ..baseline.niosh import _pixels_per_cm, analyze_lift
 from ..baseline.reba import action_level, reba_from_keypoints
+from ..baseline.tecnica import VERDICTS, assess_technique
 from ..datasets.uwiom import LABEL_FIELDS
 from ..load.carga import associate_to_person, build_load
 from ..models.tcn import SkeletonTCN, normalize_windows
@@ -279,6 +280,7 @@ class LiveSession:
                 [c for c, ok in datos["reliable"].items() if not bool(ok[0])] if presente else []
             ),
             "side": str(datos["side"][0]) if presente else None,
+            "technique": self._technique(datos) if presente else None,
             "load": self._load_payload(),
             "skeleton": self._canvas_skeleton(keypoints, caja) if presente else None,
             "seconds_by_level": {k: round(v, 1) for k, v in self.seconds_by_level.items()},
@@ -355,6 +357,22 @@ class LiveSession:
             tuple(self.config.load_catalog) or None,
             poligonos[indice] if indice < len(poligonos) else None,
         )
+
+    def _technique(self, datos) -> dict:
+        """El consejo de técnica: qué hacer distinto, o que ya está bien hecho.
+
+        Existe porque el puntaje solo no sirve de consejo: agacharse doblando la
+        espalda y agacharse en cuclligas dan el MISMO REBA (medido: 4 y 4), y uno
+        es evitable y el otro es el mínimo de la tarea.
+        """
+        codigo = str(
+            assess_technique(
+                datos["trunk"], datos["legs"], datos["upper_arm"], datos["reba"],
+                threshold=self.config.risk_threshold,
+            )[0]
+        )
+        v = VERDICTS[codigo]
+        return {"code": v.code, "message": v.message, "avoidable": v.avoidable}
 
     def _load_payload(self) -> dict | None:
         if self._last_load is None:
