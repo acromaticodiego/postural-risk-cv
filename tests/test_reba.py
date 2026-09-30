@@ -294,6 +294,39 @@ def test_without_confidences_everything_behaves_as_before() -> None:
     assert antes["side"][0] == "right", "sin confianzas se conserva el lado de siempre"
 
 
+def test_a_frontal_camera_cannot_measure_trunk_flexion() -> None:
+    """El falso negativo más grave que ha tenido este proyecto.
+
+    Agacharse doblando la espalda sale naranja de perfil y VERDE de frente, siendo
+    la misma postura: inclinarse HACIA la cámara no produce ningún ángulo en la
+    imagen. Un sistema que ahí contesta «verde» dice «seguro» cuando debería decir
+    «desde aquí no puedo ver esto».
+    """
+    from src.baseline.reba import is_frontal_view
+
+    # De perfil: un hombro casi tapa al otro.
+    perfil = _standing_neutral().copy()
+    perfil[0, JOINT["left_shoulder"]] = (100, 200)
+    perfil[0, JOINT["right_shoulder"]] = (104, 200)
+    assert not is_frontal_view(perfil)[0]
+
+    # De frente: los hombros se ven en toda su anchura.
+    frontal = _standing_neutral().copy()
+    frontal[0, JOINT["left_shoulder"]] = (60, 200)
+    frontal[0, JOINT["right_shoulder"]] = (150, 200)
+    assert is_frontal_view(frontal)[0]
+
+    r = reba_from_keypoints(frontal)
+    assert bool(r["frontal_view"][0]) is True
+    assert bool(r["reliable"]["trunk"][0]) is False, (
+        "de frente el tronco no es medible y tiene que decirlo"
+    )
+    assert bool(r["reliable"]["legs"][0]) is True, (
+        "las piernas SÍ se ven de frente: la pierna se comprime al agacharse y eso "
+        "es visible desde cualquier ángulo. Invalidarlo todo sería pasarse"
+    )
+
+
 def test_invalid_assumptions_are_rejected() -> None:
     for kwargs in ({"wrist": 0}, {"wrist": 4}, {"load_force": -1}, {"coupling": 9}):
         try:

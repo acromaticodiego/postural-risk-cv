@@ -280,6 +280,7 @@ class LiveSession:
                 [c for c, ok in datos["reliable"].items() if not bool(ok[0])] if presente else []
             ),
             "side": str(datos["side"][0]) if presente else None,
+            "frontal_view": bool(datos["frontal_view"][0]) if presente else False,
             "technique": self._technique(datos) if presente else None,
             "load": self._load_payload(),
             "skeleton": self._canvas_skeleton(keypoints, caja) if presente else None,

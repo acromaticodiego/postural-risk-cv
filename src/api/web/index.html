@@ -568,7 +568,10 @@ function vistaEnVivo(){
       fila.title = dudoso ? "articulaciones no visibles en este fotograma" : "";
       comps.append(fila);
     }
-    if (d.partial){
+    if (d.frontal_view){
+      avisoVista.textContent = "⚠ camara de frente: la flexion de la espalda NO se puede medir desde aqui. Coloca la camara de lado.";
+      avisoVista.style.display = "inline-block";
+    } else if (d.partial){
       avisoVista.textContent = "⚠ oclusion: " + (d.unreliable||[]).map(c => NOMBRE_COMP[c]||c).join(", ");
       avisoVista.style.display = "inline-block";
     } else {

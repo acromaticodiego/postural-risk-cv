@@ -257,6 +257,41 @@ COMPONENT_JOINTS = {
 }
 
 
+# Por encima de esta razón entre anchura de hombros y altura del cuerpo, la persona
+# está demasiado de frente para medir la flexión del tronco. Medido el 30/09 sobre
+# grabaciones propias: de perfil la razón está en 0,047 y de frente en 0,205.
+FRONTAL_VIEW_RATIO = 0.13
+
+
+def is_frontal_view(keypoints: np.ndarray) -> np.ndarray:
+    """¿La cámara ve a la persona demasiado de frente para medir la flexión?
+
+    ES EL FALLO MÁS GRAVE QUE ENCONTRÓ ESTE PROYECTO, y lo encontró Juan Diego
+    grabándose: agacharse doblando la espalda sale naranja de perfil y VERDE de
+    frente, siendo la misma postura. Medido sobre su vídeo, de pie de perfil con el
+    tronco a 60 grados el sistema marcaba riesgo; de frente, la misma inclinación
+    daba 4 grados medidos y riesgo despreciable.
+
+    La causa es geometría pura: inclinarse HACIA la cámara no produce ningún ángulo
+    en la imagen, se proyecta como un acortamiento. Un sistema que en esa vista
+    contesta «verde» está diciendo «seguro» cuando debería decir «desde aquí no
+    puedo ver esto», y un falso negativo en seguridad es lo peor que puede hacer.
+
+    Por eso un evaluador de ergonomía se coloca SIEMPRE de lado: REBA se evalúa en
+    el plano sagital. La cámara tiene la misma obligación, y ahora el sistema lo
+    comprueba en vez de suponerlo.
+
+    Las cuclillas sí se ven de frente —la pierna se comprime y eso es visible desde
+    cualquier ángulo—, así que lo que se marca como no medible es el TRONCO, no
+    todo.
+    """
+    alto = np.maximum(keypoints[:, :, 1].max(axis=1) - keypoints[:, :, 1].min(axis=1), 1.0)
+    hombros = np.abs(
+        keypoints[:, JOINT["left_shoulder"], 0] - keypoints[:, JOINT["right_shoulder"], 0]
+    )
+    return (hombros / alto) > FRONTAL_VIEW_RATIO
+
+
 def best_side(scores: np.ndarray) -> str:
     """Qué lado del cuerpo se ve mejor, mirando brazo y pierna.
 
@@ -406,6 +441,12 @@ def reba_from_keypoints(
         lados = np.full(n, "right")
         fiabilidad = {c: np.ones(n, dtype=bool) for c in COMPONENT_JOINTS}
 
+    # La vista frontal invalida el tronco y el cuello: sus flexiones van en el plano
+    # que la cámara no ve. Las piernas y los brazos siguen valiendo.
+    frontal = is_frontal_view(keypoints)
+    fiabilidad["trunk"] = fiabilidad["trunk"] & ~frontal
+    fiabilidad["neck"] = fiabilidad["neck"] & ~frontal
+
     if bilateral_support is None:
         bilateral_support = np.ones(n, dtype=bool)
 
@@ -425,6 +466,7 @@ def reba_from_keypoints(
 
     return angles | {
         "side": lados,
+        "frontal_view": frontal,
         "reliable": fiabilidad,
         "partial": ~np.all(np.stack(list(fiabilidad.values())), axis=0),
         "trunk": trunk,
