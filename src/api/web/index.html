@@ -474,7 +474,8 @@ function vistaEnVivo(){
   centro.append(el("div",{className:"etiqueta",textContent:"Tarea reconocida"}));
   const tarea = el("div",{className:"tarea-viva",textContent:"—"});
   const avisoTarea = el("div",{className:"aviso",style:"display:none"});
-  centro.append(avisoTarea);
+  const avisoVista = el("div",{className:"aviso",style:"display:none;margin-left:8px"});
+  centro.append(avisoTarea, avisoVista);
   const comps = el("div",{style:"margin-top:14px;max-width:420px"});
   centro.append(tarea, comps);
   tira.append(marcador, centro);
@@ -548,15 +549,27 @@ function vistaEnVivo(){
       tarea.style.opacity = "1";
     }
 
+    // Un componente cuyas articulaciones no se ven se muestra atenuado y con un
+    // interrogante: es preferible decir «esto no se sabe» a enseñar un puntaje
+    // sacado de una articulación que estaba tapada.
+    const dudosos = new Set(d.unreliable || []);
     comps.innerHTML = "";
     for (const [clave, etiqueta] of Object.entries(NOMBRE_COMP)){
       const valor = d.components[clave] || 0;
-      const fila = el("div",{className:"comp"});
+      const dudoso = dudosos.has(clave);
+      const fila = el("div",{className:"comp", style: dudoso ? "opacity:.4" : ""});
       fila.innerHTML = `<span>${etiqueta}</span>
         <span class="medidor"><i style="width:${100*Math.min(valor/MAX_COMP[clave],1)}%;
-          background:${valor/MAX_COMP[clave] >= .75 ? css("--n4") : css("--n3")}"></i></span>
-        <span>${valor}</span>`;
+          background:${dudoso ? css("--tenue") : (valor/MAX_COMP[clave] >= .75 ? css("--n4") : css("--n3"))}"></i></span>
+        <span>${dudoso ? "?" : valor}</span>`;
+      fila.title = dudoso ? "articulaciones no visibles en este fotograma" : "";
       comps.append(fila);
+    }
+    if (d.partial){
+      avisoVista.textContent = "⚠ oclusion: " + (d.unreliable||[]).map(c => NOMBRE_COMP[c]||c).join(", ");
+      avisoVista.style.display = "inline-block";
+    } else {
+      avisoVista.style.display = "none";
     }
 
     const ultimoLift = [...d.events].reverse().find(e => e.niosh);

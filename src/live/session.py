@@ -140,18 +140,19 @@ class LiveSession:
 
     # --- ciclo -------------------------------------------------------------
 
-    def read(self) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
-        """Un fotograma: devuelve (imagen, keypoints, caja) o (None, None, None)."""
+    def read(self):
+        """Un fotograma: (imagen, keypoints, caja, confianzas) o todo None."""
         ok, frame = self.capture.read()
         if not ok:
-            return None, None, None
+            return None, None, None, None
         resultado = self.pose.predict(frame, device=self.device, verbose=False)[0]
         cajas = None if resultado.boxes is None else resultado.boxes.xyxy.cpu().numpy()
         if cajas is None or not len(cajas):
-            return frame, None, None
+            return frame, None, None, None
         areas = (cajas[:, 2] - cajas[:, 0]) * (cajas[:, 3] - cajas[:, 1])
         slot = int(areas.argmax())
-        return frame, resultado.keypoints.data.cpu().numpy()[slot, :, :2], cajas[slot]
+        kp = resultado.keypoints.data.cpu().numpy()[slot]
+        return frame, kp[:, :2], cajas[slot], kp[:, 2]
 
     def check_trust(self, task: str, trunk_deg: float, keypoints: np.ndarray) -> str | None:
         """¿Hay motivo para no fiarse de la tarea que acaba de predecir el modelo?
@@ -214,12 +215,13 @@ class LiveSession:
         que usan las pruebas para ejercitar todo el camino de una persona presente
         sin necesitar a nadie delante del portátil.
         """
+        confianzas = None
         if feed is not None:
             keypoints, caja = feed
             frame = None
             want_preview = False
         else:
-            frame, keypoints, caja = self.read()
+            frame, keypoints, caja, confianzas = self.read()
             if frame is None:
                 return None
 
@@ -231,7 +233,9 @@ class LiveSession:
             self.buffer.append(keypoints)
             self._detect_load(frame, keypoints)
             datos = reba_from_keypoints(
-                keypoints[None, ...], assumptions=self.config.assumptions()
+                keypoints[None, ...],
+                assumptions=self.config.assumptions(),
+                scores=None if confianzas is None else confianzas[None, ...],
             )
             reba = int(datos["reba"][0])
             componentes = {c: int(datos[c][0]) for c in COMPONENTS}
@@ -270,6 +274,11 @@ class LiveSession:
             "angles": angulos,
             "task": self._last_task,
             "task_warning": aviso,
+            "partial": bool(datos["partial"][0]) if presente else False,
+            "unreliable": (
+                [c for c, ok in datos["reliable"].items() if not bool(ok[0])] if presente else []
+            ),
+            "side": str(datos["side"][0]) if presente else None,
             "load": self._load_payload(),
             "skeleton": self._canvas_skeleton(keypoints, caja) if presente else None,
             "seconds_by_level": {k: round(v, 1) for k, v in self.seconds_by_level.items()},

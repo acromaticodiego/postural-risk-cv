@@ -231,7 +231,95 @@ def _angle_between(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))
 
 
-def body_angles(keypoints: np.ndarray) -> dict[str, np.ndarray]:
+# Por debajo de esta confianza, una articulación no se ve lo bastante como para
+# calcular un ángulo con ella. Medido el 30/09 sobre una grabación con una caja
+# sostenida delante del cuerpo: el codo y la muñeca del lado ocluido caen por debajo
+# de 0,5 en el 21-24% de los fotogramas, y entraban en el cálculo igual que una
+# articulación perfectamente visible. Subir de modelo no lo arregla —de yolo11n a
+# yolo11m son 5 puntos por 70 ms más— porque el problema no es el modelo: es que
+# detrás de una caja no hay nada que ver.
+MIN_JOINT_CONFIDENCE = 0.5
+
+# Qué articulaciones necesita cada componente. Si alguna no se ve, ese componente
+# no se calcula: es preferible decir «esto no se sabe» a publicar un ángulo sacado
+# de una articulación inventada.
+COMPONENT_JOINTS = {
+    "trunk": ("left_hip", "right_hip", "left_shoulder", "right_shoulder"),
+    # El cuello NO depende de las orejas. Medido el 30/09: la oreja derecha cae por
+    # debajo de 0,5 de confianza en el 43% de los fotogramas y la izquierda en el
+    # 27%, así que el cuello salía no fiable en el 60% — con diferencia el peor
+    # componente, y no porque el cuello sea difícil sino porque se estaba mirando la
+    # parte de la cara que menos se ve. La nariz tiene 0,88 de confianza media.
+    "neck": ("left_shoulder", "right_shoulder", "head"),
+    "legs": ("hip", "knee", "ankle"),
+    "upper_arm": ("shoulder", "elbow"),
+    "lower_arm": ("shoulder", "elbow", "wrist"),
+}
+
+
+def best_side(scores: np.ndarray) -> str:
+    """Qué lado del cuerpo se ve mejor, mirando brazo y pierna.
+
+    Antes se usaba siempre el derecho, sin más motivo que haber elegido uno. Con una
+    persona de perfil o sosteniendo algo, un lado queda ocluido y el otro no: medir
+    por el tapado es tirar precisión que estaba disponible al lado.
+
+    Un evaluador humano puntúa el lado PEOR, que es lo prudente. Aquí se elige el
+    mejor VISIBLE, que es distinto y hay que decirlo: no se puede puntuar lo que no
+    se ve, y con el lado oculto el puntaje no sería más prudente, sería ruido.
+    """
+    lados = {}
+    for lado in ("left", "right"):
+        articulaciones = [f"{lado}_{n}" for n in ("shoulder", "elbow", "wrist", "knee", "ankle")]
+        lados[lado] = float(np.mean([scores[JOINT[a]] for a in articulaciones]))
+    return max(lados, key=lados.get)
+
+
+# La cabeza se localiza con la articulación facial que MEJOR se vea, por este orden
+# de preferencia anatómica. Las orejas dan el ángulo del cuello más exacto, pero si
+# no se ven, la nariz y los ojos dan uno algo peor y disponible — y un ángulo algo
+# peor vale infinitamente más que ninguno.
+HEAD_JOINTS = ("left_ear", "right_ear", "nose", "left_eye", "right_eye")
+
+
+def head_point(keypoints: np.ndarray, scores: np.ndarray | None = None) -> np.ndarray:
+    """La posición de la cabeza, con lo que haya visible.
+
+    Sin confianzas se usa el punto medio de las orejas, que es lo que se hacía antes.
+    """
+    if scores is None:
+        return keypoints[[JOINT["left_ear"], JOINT["right_ear"]], :].mean(axis=0)
+    visibles = [
+        keypoints[JOINT[n]] for n in HEAD_JOINTS if scores[JOINT[n]] >= MIN_JOINT_CONFIDENCE
+    ]
+    if not visibles:
+        return keypoints[[JOINT["left_ear"], JOINT["right_ear"]], :].mean(axis=0)
+    return np.mean(visibles, axis=0)
+
+
+def component_reliability(
+    scores: np.ndarray, side: str, min_confidence: float = MIN_JOINT_CONFIDENCE
+) -> dict[str, bool]:
+    """Qué componentes de REBA se pueden calcular con lo que se ve en este fotograma."""
+    fiable = {}
+    for componente, articulaciones in COMPONENT_JOINTS.items():
+        ok = True
+        for a in articulaciones:
+            if a == "head":
+                # Basta con que se vea UNA articulación de la cara.
+                ok = ok and any(
+                    scores[JOINT[n]] >= min_confidence for n in HEAD_JOINTS
+                )
+                continue
+            nombre = a if "_" in a else f"{side}_{a}"
+            ok = ok and scores[JOINT[nombre]] >= min_confidence
+        fiable[componente] = ok
+    return fiable
+
+
+def body_angles(
+    keypoints: np.ndarray, side: str = "right", scores: np.ndarray | None = None
+) -> dict[str, np.ndarray]:
     """Los cinco ángulos observables, en grados, por fotograma.
 
     En coordenadas de imagen la y crece hacia abajo, así que «arriba» es -y. El
@@ -240,19 +328,22 @@ def body_angles(keypoints: np.ndarray) -> dict[str, np.ndarray]:
     """
     hip = _mid(keypoints, "left_hip", "right_hip")
     shoulder = _mid(keypoints, "left_shoulder", "right_shoulder")
-    ear = _mid(keypoints, "left_ear", "right_ear")
+    ear = np.stack([
+        head_point(keypoints[i], None if scores is None else scores[i])
+        for i in range(len(keypoints))
+    ])
     arriba = np.tile([0.0, -1.0], (len(keypoints), 1))
 
     trunk_vec = shoulder - hip
     neck_vec = ear - shoulder
 
-    # Se mide el lado derecho: en UW-IOM el participante trabaja de perfil y una
-    # sola cámara no ve bien los dos brazos. Con varias personas o dos manos habrá
-    # que decidir si se puntúa el peor lado, que es lo que haría un evaluador.
-    upper_arm_vec = keypoints[:, JOINT["right_elbow"], :] - keypoints[:, JOINT["right_shoulder"], :]
-    forearm_vec = keypoints[:, JOINT["right_wrist"], :] - keypoints[:, JOINT["right_elbow"], :]
-    thigh_vec = keypoints[:, JOINT["right_knee"], :] - keypoints[:, JOINT["right_hip"], :]
-    shin_vec = keypoints[:, JOINT["right_ankle"], :] - keypoints[:, JOINT["right_knee"], :]
+    # El lado se elige por visibilidad y ya no está fijo en el derecho: con alguien
+    # de perfil o sosteniendo algo, un lado queda ocluido y medir por él es tirar
+    # precisión que estaba al otro lado.
+    upper_arm_vec = keypoints[:, JOINT[f"{side}_elbow"], :] - keypoints[:, JOINT[f"{side}_shoulder"], :]
+    forearm_vec = keypoints[:, JOINT[f"{side}_wrist"], :] - keypoints[:, JOINT[f"{side}_elbow"], :]
+    thigh_vec = keypoints[:, JOINT[f"{side}_knee"], :] - keypoints[:, JOINT[f"{side}_hip"], :]
+    shin_vec = keypoints[:, JOINT[f"{side}_ankle"], :] - keypoints[:, JOINT[f"{side}_knee"], :]
 
     return {
         "trunk_flexion": _angle_between(trunk_vec, arriba),
@@ -275,6 +366,8 @@ def reba_from_keypoints(
     present: np.ndarray | None = None,
     assumptions: RebaAssumptions | None = None,
     bilateral_support: np.ndarray | None = None,
+    scores: np.ndarray | None = None,
+    min_confidence: float = MIN_JOINT_CONFIDENCE,
 ) -> dict[str, np.ndarray]:
     """Puntaje REBA por fotograma, con todos los componentes a la vista.
 
@@ -286,8 +379,32 @@ def reba_from_keypoints(
     por eso no se puede confundir con un riesgo bajo.
     """
     assumptions = assumptions or RebaAssumptions()
-    angles = body_angles(keypoints)
     n = len(keypoints)
+
+    # El lado se decide por fotograma con las confianzas, si las hay. Sin ellas se
+    # conserva el derecho, que es lo que se hacía antes de tener esta información.
+    if scores is not None:
+        lados = np.array([best_side(scores[i]) for i in range(n)])
+        angles = {}
+        for lado in ("left", "right"):
+            mascara = lados == lado
+            if not mascara.any():
+                continue
+            parciales = body_angles(keypoints[mascara], side=lado, scores=scores[mascara])
+            for clave, valores in parciales.items():
+                if clave not in angles:
+                    angles[clave] = np.zeros(n)
+                angles[clave][mascara] = valores
+        fiabilidad = {
+            c: np.array([
+                component_reliability(scores[i], lados[i], min_confidence)[c] for i in range(n)
+            ])
+            for c in COMPONENT_JOINTS
+        }
+    else:
+        angles = body_angles(keypoints)
+        lados = np.full(n, "right")
+        fiabilidad = {c: np.ones(n, dtype=bool) for c in COMPONENT_JOINTS}
 
     if bilateral_support is None:
         bilateral_support = np.ones(n, dtype=bool)
@@ -307,6 +424,9 @@ def reba_from_keypoints(
         c = np.where(present, c, 0)
 
     return angles | {
+        "side": lados,
+        "reliable": fiabilidad,
+        "partial": ~np.all(np.stack(list(fiabilidad.values())), axis=0),
         "trunk": trunk,
         "neck": neck,
         "legs": legs,

@@ -239,6 +239,61 @@ def test_absent_frames_get_no_risk_level() -> None:
     raise AssertionError("el 0 de un fotograma sin persona pasó por un nivel válido")
 
 
+def test_the_more_visible_side_is_the_one_measured() -> None:
+    """Con un lado ocluido, se mide por el otro.
+
+    Antes se usaba siempre el derecho, sin más motivo que haber elegido uno. Medido
+    el 30/09 sobre una grabación con una caja delante del cuerpo, el codo y la
+    muñeca del lado tapado caen por debajo de 0,5 en el 21-24% de los fotogramas.
+    """
+    from src.baseline.reba import best_side
+
+    confianzas = np.full(N_JOINTS, 0.9, dtype=np.float32)
+    for nombre in ("right_shoulder", "right_elbow", "right_wrist", "right_knee", "right_ankle"):
+        confianzas[JOINT[nombre]] = 0.2
+    assert best_side(confianzas) == "left"
+
+    confianzas[:] = 0.9
+    for nombre in ("left_elbow", "left_wrist", "left_ankle"):
+        confianzas[JOINT[nombre]] = 0.15
+    assert best_side(confianzas) == "right"
+
+
+def test_a_component_whose_joints_are_hidden_is_flagged_not_invented() -> None:
+    """Si una articulación no se ve, ese componente se marca como no fiable.
+
+    Antes entraba en el cálculo igual que una perfectamente visible: un ángulo
+    sacado de una muñeca con 0,1 de confianza pesaba lo mismo que uno real, y el
+    puntaje salía con la misma cara de certeza.
+    """
+    kp = np.concatenate([_standing_neutral(), _standing_neutral()])
+    confianzas = np.full((2, N_JOINTS), 0.9, dtype=np.float32)
+    # En el segundo fotograma se tapan las dos muñecas: el antebrazo deja de ser
+    # calculable por cualquiera de los dos lados.
+    confianzas[1, JOINT["left_wrist"]] = 0.1
+    confianzas[1, JOINT["right_wrist"]] = 0.1
+
+    r = reba_from_keypoints(kp, scores=confianzas)
+    assert bool(r["reliable"]["lower_arm"][0]) is True
+    assert bool(r["reliable"]["lower_arm"][1]) is False
+    assert bool(r["partial"][0]) is False and bool(r["partial"][1]) is True
+    # El tronco sigue siendo fiable: sus articulaciones se ven en los dos.
+    assert bool(r["reliable"]["trunk"][1]) is True
+
+
+def test_without_confidences_everything_behaves_as_before() -> None:
+    """La compatibilidad hacia atrás: sin confianzas, el resultado no cambia.
+
+    Importa porque todos los números publicados del proyecto se calcularon así, y un
+    cambio silencioso en el cálculo los invalidaría sin avisar.
+    """
+    kp = _bent_over()
+    antes = reba_from_keypoints(kp)
+    assert int(antes["reba"][0]) > 0
+    assert bool(antes["partial"][0]) is False, "sin confianzas nada se marca como parcial"
+    assert antes["side"][0] == "right", "sin confianzas se conserva el lado de siempre"
+
+
 def test_invalid_assumptions_are_rejected() -> None:
     for kwargs in ({"wrist": 0}, {"wrist": 4}, {"load_force": -1}, {"coupling": 9}):
         try:

@@ -43,6 +43,11 @@ class SubjectData:
 
     index: int
     keypoints: np.ndarray
+    confidences: np.ndarray
+    """Confianza por articulación. Se guardaba en el `.npz` desde el principio y no
+    se usaba: el cálculo de REBA trataba igual una muñeca vista con 0,95 que una
+    tapada con 0,10. Medido el 30/09, eso pasaba en el 21-24% de los fotogramas de
+    una grabación con una caja delante del cuerpo."""
     trunk_flexion: np.ndarray
     labels: np.ndarray
     evaluable: np.ndarray
@@ -64,6 +69,7 @@ def load(index: int, hz: float = HZ, window_seconds: float = WINDOW_SECONDS) -> 
     s = load_subject(index)
     elegidos, _, presente = resample(s, hz)
     keypoints = s.skeleton.keypoints[elegidos][presente]
+    confidences = s.skeleton.scores[elegidos][presente]
     labels = np.array(s.labels)[elegidos][presente]
 
     t = int(round(window_seconds * hz))
@@ -72,6 +78,7 @@ def load(index: int, hz: float = HZ, window_seconds: float = WINDOW_SECONDS) -> 
     return SubjectData(
         index=index,
         keypoints=keypoints,
+        confidences=confidences,
         trunk_flexion=body_angles(keypoints)["trunk_flexion"],
         labels=labels,
         evaluable=np.arange(t - 1, len(keypoints)),

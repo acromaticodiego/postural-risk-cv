@@ -122,7 +122,10 @@ def process_shift(
 ) -> dict:
     """Un turno: puntúa, resume y extrae los replays de sus eventos."""
     keypoints = subject_data.keypoints[subject_data.evaluable]
-    scores = reba_from_keypoints(keypoints, assumptions=config.assumptions())
+    confianzas = subject_data.confidences[subject_data.evaluable]
+    scores = reba_from_keypoints(
+        keypoints, assumptions=config.assumptions(), scores=confianzas
+    )
     tareas = np.array(
         [
             f"{m} / {mn} / {h}"
@@ -219,8 +222,13 @@ def _worst_lift(eventos: list[dict]) -> dict | None:
 
 def build_workstation(config: WorkstationConfig, shifts: list[dict]) -> dict:
     """Agrega los turnos de un puesto en lo que se ve en la pantalla principal."""
+    # Solo se juntan las series por fotograma. La salida de REBA lleva además
+    # `reliable`, que es un diccionario de arrays y no una serie: concatenarlo como
+    # si lo fuera reventaba al agregar los turnos de un puesto.
     scores = {
-        clave: np.concatenate([t["scores"][clave] for t in shifts]) for clave in shifts[0]["scores"]
+        clave: np.concatenate([t["scores"][clave] for t in shifts])
+        for clave, valor in shifts[0]["scores"].items()
+        if isinstance(valor, np.ndarray) and valor.ndim == 1
     }
     tareas = np.concatenate([t["tareas_por_fotograma"] for t in shifts])
     informe = build_report(tareas, scores, HZ, config)
