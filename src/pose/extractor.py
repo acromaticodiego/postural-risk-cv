@@ -99,9 +99,9 @@ def extract_tracks(
         "source": video_path.name,
         "model": model_name,
         "device": str(device),
-        "source_fps": round(source_fps, 3),
+        "container_fps": round(source_fps, 3),  # NO es la tasa real de captura
         "stride": stride,
-        "effective_fps": round(source_fps / stride, 3) if source_fps else None,
+        "container_fps_effective": round(source_fps / stride, 3) if source_fps else None,
         "resolution": [width, height],
         "frames_processed": processed,
         "extracted_on": date.today().isoformat(),
@@ -211,9 +211,9 @@ def extract_single_subject(
             "source": video_path.name,
             "model": model_name,
             "device": str(device),
-            "source_fps": round(source_fps, 3),
+            "container_fps": round(source_fps, 3),  # NO es la tasa real de captura
             "stride": stride,
-            "effective_fps": round(source_fps / stride, 3) if source_fps else None,
+            "container_fps_effective": round(source_fps / stride, 3) if source_fps else None,
             "resolution": [width, height],
             "frames_processed": len(present),
             "frames_present": int(present_arr.sum()),
@@ -264,7 +264,7 @@ def _cli() -> None:
     meta = principal.meta
     print(
         f"\nprocedencia: {meta['source']} | {meta['model']} | "
-        f"{meta['source_fps']} fps | paso {meta['stride']} | "
+        f"{meta['container_fps']} fps | paso {meta['stride']} | "
         f"{meta['frames_processed']} fotogramas en {meta['extraction_seconds']} s"
     )
     if args.out:

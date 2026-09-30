@@ -74,7 +74,7 @@ def main() -> None:
         total = meta["frames_processed"]
         print(
             f"{i:3d}  {total:10d}  {presentes:11d}  {100 * presentes / total:5.1f}  "
-            f"{meta['extraction_seconds']:8.1f}   {meta['source_fps']:.2f}"
+            f"{meta['extraction_seconds']:8.1f}   {meta['container_fps']:.2f}"
         )
         if not args.conservar_videos:
             video.unlink()

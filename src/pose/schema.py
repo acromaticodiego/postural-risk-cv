@@ -55,7 +55,15 @@ JOINT = {name: i for i, name in enumerate(JOINT_NAMES)}
 
 # Versión del formato. Si cambia la semántica de lo guardado, sube, y el cargador
 # se niega a leer lo viejo en silencio: un dataset mezclado no se ve venir.
-SCHEMA_VERSION = 1
+#
+# 2 (29/09): el fps que se guardaba como `source_fps` era el de la cabecera del
+#   contenedor, y en UW-IOM ese valor está puesto a ojo —dice 8, 10, 11 o 12
+#   redondos mientras la captura real va de 7,81 a 10,58—. Pasa a llamarse
+#   `container_fps` con su advertencia. La tasa real sale de las marcas de tiempo
+#   del dataset, no del vídeo. Se sube la versión aunque nadie leyera el campo
+#   todavía, porque un metadato que miente sobre su propio dataset se acaba
+#   usando.
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
