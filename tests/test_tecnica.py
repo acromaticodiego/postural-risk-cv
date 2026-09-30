@@ -78,7 +78,10 @@ def test_avoidable_share_separates_the_two_kinds_of_action() -> None:
     r = avoidable_share(codigos, reba)
     assert r["frames_at_risk"] == 3
     assert r["avoidable"] == 2 and r["inherent"] == 1
-    assert abs(r["avoidable_share"] - 2 / 3) < 1e-9
+    # La fracción se publica redondeada a tres decimales, así que la tolerancia
+    # tiene que admitirlo: compararla con 2/3 exacto y 1e-9 falla por el redondeo,
+    # no por el cálculo.
+    assert abs(r["avoidable_share"] - 2 / 3) < 1e-3
 
 
 def test_no_risk_gives_no_shares() -> None:
