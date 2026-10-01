@@ -56,23 +56,120 @@ neutra—, que es una cifra en la que la visión siempre aporta. Mientras tanto,
 puesto de la demo se configuró sin `sudden_load` para que no saliera el 100% del
 tiempo en rojo.
 
+## DÓNDE ESTAMOS (actualizado 2026-09-30)
+
+**El sistema está completo de punta a punta y funcionando**: vídeo → esqueletos →
+riesgo según REBA → peso aceptable según NIOSH → tarea reconocida por el modelo →
+informe accionable → panel web con modo en vivo. **106 pruebas en verde**, 30
+commits.
+
+```powershell
+Set-Location C:\Users\ASUS\Desktop\pose_stimation
+.\.venv\Scripts\python.exe -m uvicorn src.api.server:app --port 8010
+# http://127.0.0.1:8010/     (el 8000 lo ocupa el agente de voz de Juan Diego)
+```
+
+### Las piezas
+
+| módulo | qué hace |
+|---|---|
+| `src/pose/` | de vídeo a esqueletos. El fotograma se destruye en la misma iteración |
+| `src/baseline/reba.py` | REBA geométrico, consciente de la confianza y del ángulo de cámara |
+| `src/baseline/niosh.py` | la ecuación de levantamiento: el peso aceptable en kilos |
+| `src/baseline/tecnica.py` | si el riesgo es evitable o es el mínimo de la tarea |
+| `src/baseline/rules.py` | la línea base sin aprendizaje: el número a batir |
+| `src/models/tcn.py` | el TCN causal que reconoce la tarea |
+| `src/load/carga.py` | la fusión de persona y carga (detector entrenado, sin validar) |
+| `src/product/` | puesto de trabajo, exposición, informe por tareas, pipeline |
+| `src/api/` | FastAPI + panel web, con modo en vivo por WebSocket |
+| `src/eval/` | partición por sujeto, métricas, arnés común |
+
+### Los números publicables
+
+| campo | degenerado | reglas | **TCN** | rango |
+|---|---|---|---|---|
+| movimiento | 0,288 | 0,670 | **0,870** | 0,829–0,882 |
+| altura de trabajo | 0,174 | 0,639 | **0,798** | 0,765–0,823 |
+| **manipulación** | 0,114 | 0,046 | **0,741** | 0,650–0,788 |
+| objeto | 0,195 | 0,123 | **0,784** | 0,738–0,812 |
+
+4 pliegues de validación cruzada por sujeto, 10 Hz, ventana causal de 2 s, 78.095
+parámetros, 17 s de entrenamiento por pliegue. **El reservado (sujetos 11, 14, 19,
+20) sigue sin tocarse.**
+
+### Lo que se descubrió grabando con la webcam (29–30/09)
+
+Cuatro vídeos de Juan Diego probando el sistema en su salón. Cada uno destapó algo:
+
+1. **El modelo de tareas no generaliza al ángulo de su cámara.** Decía `bend` con
+   el tronco a 2°. Arreglado con un guardia de coherencia: cuando la tarea
+   contradice la geometría, el sistema lo dice en vez de mostrarla como si tal.
+2. **La pose falla donde REBA más la necesita.** Codo, muñeca y tobillos caen por
+   debajo de 0,5 de confianza en el 21–24% de los fotogramas, y el cálculo no
+   miraba la confianza. **Subir de modelo no lo arregla** (yolo11n 23% de malas,
+   yolo11m 18% por 70 ms más): es oclusión. Arreglado usando el lado más visible y
+   marcando lo que no se ve.
+3. **El cuello dependía de las orejas**, que es lo que peor detecta YOLO. Pasó de
+   60% de fotogramas no fiables a 6% usando cualquier articulación facial visible.
+4. **REBA da el mismo puntaje a la técnica buena y a la mala.** Medido en su
+   vídeo: agacharse doblando la espalda da REBA 4, y en cuclillas con la espalda a
+   12° también da 4. La norma compensa lo que se gana en tronco con lo que se
+   pierde en piernas. Arreglado separando el riesgo **evitable** del **inherente**.
+5. **Y el peor de todos: de frente, la flexión del tronco es invisible.** Agacharse
+   doblando la espalda sale naranja de perfil y VERDE de frente. Inclinarse hacia
+   la cámara no produce ningún ángulo en la imagen. Era un falso negativo de
+   seguridad, que es lo peor que puede hacer un sistema así. Ahora el sistema
+   detecta la vista frontal y declara el tronco como no medible.
+
 ## LO QUE TIENES QUE HACER AHORA
 
-El dataset ya está descargado y verificado. Lo que bloquea ahora son **tres
-decisiones de criterio que son tuyas**, y hay que tomarlas antes de ver cualquier
-resultado para no ajustar la vara:
+Las tres decisiones de criterio están tomadas y escritas en el ADR 0001. El
+dataset, el modelo, el panel y el modo en vivo funcionan. Lo que queda abierto, por
+orden:
 
-1. **¿A partir de qué puntaje REBA cuenta como exposición de riesgo?** La norma
-   da niveles (1 despreciable, 2–3 bajo, 4–7 medio, 8–10 alto, 11+ muy alto).
-   Elegir dónde salta el contador es una decisión de producto, no de la norma.
-2. **¿Cuánto tiene que durar una postura para contar?** Sin un mínimo, cada gesto
-   de paso al agacharse cuenta como exposición y el informe se llena de ruido.
-3. **¿Qué le cuesta más al cliente: perder una exposición real o levantar una
-   falsa alarma?** Eso decide hacia dónde se inclina el sistema, y es lo que
-   convierte una curva de precisión y recall en un punto de operación.
+### 1. La detección de carga, a medio camino
 
-Mientras las piensas, Claude extrae los esqueletos de los 20 sujetos y monta el
-cálculo de REBA geométrico.
+Juan Diego entrenó un detector de segmentación con `package-seg` (2.197 imágenes de
+cajas de almacén, 100 épocas, **mAP50 de 0,935 en máscaras**). Los pesos están en
+`artifacts/modelo/carga.pt`.
+
+**Pero no se sabe si sirve aquí.** Probado sobre su vídeo: 0 de 89 fotogramas con
+caja detectada. La comprobación **no concluye nada**, porque lo que sostenía era un
+organizador de plástico transparente y el dataset son cajas de cartón opacas: el 0%
+tiene dos causas indistinguibles. Está escrito como la medición falsa nº 5.
+
+**Hay una propuesta suya sobre la mesa, con prueba de concepto ya hecha:** afinar
+ese modelo con sus propios vídeos, etiquetándolos **con SAM guiado por el
+esqueleto** —punto positivo entre las manos, puntos negativos en el cuerpo— en vez
+de a mano. Comprobado el 30/09 y funciona: la máscara cae sobre la caja y no sobre
+la persona. El flujo acordado:
+
+  1. extraer fotogramas variados de sus cuatro vídeos;
+  2. SAM pre-etiqueta;
+  3. **Juan Diego valida** en una hoja de contactos, descartando las malas;
+  4. afinar el modelo de `package-seg` con las buenas.
+
+**El límite que hay que decir al hacerlo**: sus vídeos tienen una caja, una
+habitación, una persona y una luz. Entrenar solo con eso aprendería *esa* caja. Por
+eso se AFINA el modelo base en vez de sustituirlo — y eso resulta ser lo que haría
+un producto real: el modelo viene de fábrica y se calibra en cada planta con las
+cargas de ese cliente.
+
+### 2. Lo que falta para el vídeo de LinkedIn
+
+  · **El README del repositorio, que no existe.** Es lo primero que ve un
+    reclutador y lo que decide si sigue mirando. Tiene que abrir con el problema y
+    su coste, no con la arquitectura.
+  · **Grabar con la cámara de lado.** Es la única vista desde la que REBA se puede
+    medir, y ahora el sistema avisa cuando no lo está.
+
+### 3. Lo apuntado y no hecho
+
+  · **El exceso postural**: cuánto añade la postura sobre el mínimo de ese puesto.
+    Nace de que un puesto con carga pesada declarada sale en riesgo aunque la
+    persona esté erguida, y entonces la cámara deja de aportar.
+  · **Las fases 4 y 5** de este documento. Ojo con la 5: la medición del 30/09 dice
+    que el tiempo no está en la red, así que cuantizar podría no arreglar nada.
 
 ---
 
