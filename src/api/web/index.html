@@ -129,6 +129,9 @@ input[type=range]{flex:1;accent-color:var(--acento)}
   background:var(--panel);border:1px solid var(--borde);border-radius:10px;
   padding:18px 22px;margin-top:16px}
 .tarea-viva{font-family:ui-monospace,Consolas,monospace;font-size:16px}
+.carga-viva{margin-top:10px;font-size:12.5px;border-left:3px solid var(--acento);
+  padding-left:10px;line-height:1.7}
+.carga-viva .tenue{color:var(--tenue)}
 .etiqueta{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--tenue)}
 </style>
 </head>
@@ -476,8 +479,9 @@ function vistaEnVivo(){
   const avisoTarea = el("div",{className:"aviso",style:"display:none"});
   const avisoVista = el("div",{className:"aviso",style:"display:none;margin-left:8px"});
   centro.append(avisoTarea, avisoVista);
+  const carga = el("div",{className:"carga-viva",style:"display:none"});
   const comps = el("div",{style:"margin-top:14px;max-width:420px"});
-  centro.append(tarea, comps);
+  centro.append(tarea, carga, comps);
   tira.append(marcador, centro);
   v.append(tira);
 
@@ -533,6 +537,19 @@ function vistaEnVivo(){
         if (d.skeleton[k][0]===0 && d.skeleton[k][1]===0) continue;
         ctx.beginPath(); ctx.arc(X(k),Y(k),4,0,7); ctx.fill();
       }
+
+      // La carga va EN ESTA VISTA, no solo sobre la camara. Esta columna es "lo
+      // unico que sale del dispositivo", y si el sistema aplica el peso de una caja
+      // que vio, la caja tiene que estar en lo que se conserva: si no, el replay de
+      // un incidente no podria explicar de donde salio ese peso.
+      if (d.load && d.load.canvas && d.load.canvas.length > 2){
+        const q = d.load.canvas;
+        ctx.strokeStyle = css("--acento"); ctx.lineWidth = 3; ctx.setLineDash([6,4]);
+        ctx.beginPath();
+        ctx.moveTo(q[0][0]*escala + dx, q[0][1]*escala + dy);
+        for (let i = 1; i < q.length; i++) ctx.lineTo(q[i][0]*escala + dx, q[i][1]*escala + dy);
+        ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+      }
     } else {
       ctx.fillStyle = css("--suave"); ctx.font = "14px system-ui";
       ctx.fillText("sin persona en cuadro", 20, lienzo.height - 20);
@@ -543,6 +560,21 @@ function vistaEnVivo(){
     nivel.textContent = d.level;
     nivel.style.color = c;
     tarea.textContent = d.task;
+
+    // La carga vista. Si no se ve ninguna se dice, en vez de dejar el hueco de
+    // antes: "no hay caja en las manos" y "el detector no esta puesto" son dos
+    // cosas distintas y la demo tiene que poder distinguirlas.
+    if (d.load){
+      const medida = d.load.width_cm ? `${d.load.width_cm} cm de ancho` : "sin escala declarada";
+      const peso = d.load.weight_kg ? ` · ${d.load.weight_kg} kg (${d.load.matched})` : "";
+      carga.innerHTML = `<b>Carga detectada</b> · ${medida}${peso}
+        <span class="tenue">· confianza ${d.load.confidence}</span>`;
+      carga.style.display = "block";
+    } else {
+      carga.innerHTML = `<span class="tenue">Sin carga en las manos</span>`;
+      carga.style.display = "block";
+    }
+
     if (d.task_warning){
       avisoTarea.textContent = "⚠ " + d.task_warning;
       avisoTarea.style.display = "inline-block";

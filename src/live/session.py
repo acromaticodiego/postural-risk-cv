@@ -227,18 +227,24 @@ class LiveSession:
     def step(
         self,
         want_preview: bool = True,
-        feed: tuple[np.ndarray | None, np.ndarray | None] | None = None,
+        feed: tuple | None = None,
     ) -> dict | None:
         """Procesa un fotograma y devuelve lo que se pinta en pantalla.
 
-        `feed` permite inyectar (keypoints, caja) en vez de leer la cámara. Es lo
-        que usan las pruebas para ejercitar todo el camino de una persona presente
-        sin necesitar a nadie delante del portátil.
+        `feed` permite inyectar (keypoints, caja) —y opcionalmente la imagen— en vez
+        de leer la cámara. Es lo que usan las pruebas para ejercitar todo el camino de
+        una persona presente sin necesitar a nadie delante del portátil.
+
+        La imagen es opcional y no estaba al principio, y su ausencia dejaba fuera
+        justo el detector de carga: sin fotograma no hay nada que detectar, así que esa
+        mitad del modo en vivo solo se podía comprobar con una caja en las manos
+        delante de la webcam. Con ella, una grabación guardada recorre el mismo camino
+        que la cámara.
         """
         confianzas = None
         if feed is not None:
-            keypoints, caja = feed
-            frame = None
+            keypoints, caja = feed[0], feed[1]
+            frame = feed[2] if len(feed) > 2 else None
             want_preview = False
         else:
             frame, keypoints, caja, confianzas = self.read()
@@ -301,7 +307,7 @@ class LiveSession:
             "side": str(datos["side"][0]) if presente else None,
             "frontal_view": bool(datos["frontal_view"][0]) if presente else False,
             "technique": self._technique(datos) if presente else None,
-            "load": self._load_payload(),
+            "load": self._load_payload(caja) if presente else None,
             "skeleton": self._canvas_skeleton(keypoints, caja) if presente else None,
             "seconds_by_level": {k: round(v, 1) for k, v in self.seconds_by_level.items()},
             "events": [e.__dict__ for e in self.events[-8:]],
@@ -326,6 +332,30 @@ class LiveSession:
         centro = np.array([(caja[0] + caja[2]) / 2, (caja[1] + caja[3]) / 2])
         return np.round((keypoints - centro) / alto * 0.8 + 0.5, 4).tolist()
 
+    def _canvas_load(self, caja: np.ndarray) -> list | None:
+        """El contorno de la carga en 0..1, con la MISMA transformación que el esqueleto.
+
+        Tiene que ser la misma o la caja saldría desplazada respecto a las manos que la
+        sujetan, que es justo lo que esta vista existe para enseñar. Por eso se calcula
+        aquí, donde está la caja de la persona, y no dentro de `_load_payload`.
+
+        Y que la carga aparezca en la vista de esqueleto no es decorado: esa columna es
+        «lo único que sale del dispositivo». Si el sistema aplica el peso de una caja
+        que vio, la caja tiene que estar en lo que se conserva, o el replay de un
+        incidente no podría explicar de dónde salió ese peso.
+        """
+        if self._last_load is None:
+            return None
+        alto = max(float(caja[3] - caja[1]), 1.0)
+        centro = np.array([(caja[0] + caja[2]) / 2, (caja[1] + caja[3]) / 2])
+        contorno = self._last_load.polygon
+        if contorno:
+            puntos = np.asarray(contorno, dtype=np.float32)
+        else:
+            x0, y0, x1, y1 = self._last_load.box
+            puntos = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32)
+        return np.round((puntos - centro) / alto * 0.8 + 0.5, 4).tolist()
+
     def _preview(self, frame: np.ndarray, keypoints: np.ndarray | None) -> str:
         """La imagen de la cámara con el esqueleto encima, para la vista de montaje.
 
@@ -334,6 +364,14 @@ class LiveSession:
         """
         escala = PREVIEW_WIDTH / frame.shape[1]
         pequeno = cv2.resize(frame, (PREVIEW_WIDTH, int(frame.shape[0] * escala)))
+        if self._last_load is not None:
+            contorno = self._last_load.polygon
+            if contorno:
+                puntos = (np.asarray(contorno, dtype=np.float32) * escala).astype(int)
+                cv2.polylines(pequeno, [puntos], True, (60, 180, 255), 2, cv2.LINE_AA)
+            else:
+                x0, y0, x1, y1 = (int(v * escala) for v in self._last_load.box)
+                cv2.rectangle(pequeno, (x0, y0), (x1, y1), (60, 180, 255), 2)
         if keypoints is not None:
             from ..viz.render import HUESOS
             from ..pose.schema import JOINT
@@ -414,11 +452,12 @@ class LiveSession:
         v = VERDICTS[codigo]
         return {"code": v.code, "message": v.message, "avoidable": v.avoidable}
 
-    def _load_payload(self) -> dict | None:
+    def _load_payload(self, caja: np.ndarray) -> dict | None:
         if self._last_load is None:
             return None
         c = self._last_load
         return {
+            "canvas": self._canvas_load(caja),
             "box": c.box,
             "center": c.center,
             "confidence": c.confidence,
