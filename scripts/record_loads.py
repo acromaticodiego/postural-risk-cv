@@ -52,13 +52,28 @@ def main() -> int:
     parser.add_argument("--alto", type=int, default=720)
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--destino", default=str(DESTINO))
+    parser.add_argument(
+        "--cuenta-atras",
+        type=float,
+        default=5.0,
+        help="segundos para colocarse antes de que empiece a grabar. 0 para empezar ya",
+    )
+    parser.add_argument(
+        "--rehacer",
+        action="store_true",
+        help="sobrescribe una toma anterior con el mismo nombre",
+    )
     args = parser.parse_args()
 
     destino = Path(args.destino)
     destino.mkdir(parents=True, exist_ok=True)
     salida = destino / f"{args.nombre}.mp4"
-    if salida.exists():
-        print(f"ya existe {salida}. Elige otro nombre o bórralo.")
+    if salida.exists() and not args.rehacer:
+        # Negarse por defecto es lo correcto —una toma buena no se pisa sin querer—
+        # pero la primera toma de alguien dura dos segundos y la va a repetir, así que
+        # la salida tiene que estar aquí y no en pedirle a otro que borre el fichero.
+        print(f"ya existe {salida}")
+        print(f"para repetir la toma:  ...record_loads.py --nombre {args.nombre} --rehacer")
         return 2
 
     captura = cv2.VideoCapture(args.camara, cv2.CAP_DSHOW)
@@ -72,6 +87,46 @@ def main() -> int:
     alto = int(captura.get(cv2.CAP_PROP_FRAME_HEIGHT))
     if (ancho, alto) != (args.ancho, args.alto):
         print(f"la cámara dio {ancho}x{alto} en vez de {args.ancho}x{args.alto}")
+
+    # Antes de grabar, tiempo para apartarse del teclado y colocarse con la carga. Sin
+    # esto la toma empieza con alguien sentado delante del portátil, que no es una
+    # postura de trabajo y encima son los primeros fotogramas, los que más se miran.
+    if args.cuenta_atras > 0:
+        import time
+
+        arranque = time.monotonic()
+        while True:
+            restante = args.cuenta_atras - (time.monotonic() - arranque)
+            if restante <= 0:
+                break
+            ok, fotograma = captura.read()
+            if not ok:
+                break
+            vista = fotograma.copy()
+            cv2.putText(
+                vista,
+                f"{restante:.0f}",
+                (ancho // 2 - 40, alto // 2),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                4.0,
+                (40, 200, 255),
+                6,
+            )
+            cv2.putText(
+                vista,
+                "colocate con la carga",
+                (ancho // 2 - 190, alto // 2 + 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.9,
+                (40, 200, 255),
+                2,
+            )
+            cv2.imshow("grabando la camara en crudo", vista)
+            if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                captura.release()
+                cv2.destroyAllWindows()
+                print("cancelado antes de empezar")
+                return 1
 
     escritor = cv2.VideoWriter(str(salida), cv2.VideoWriter_fourcc(*"mp4v"), args.fps, (ancho, alto))
     print(f"grabando {ancho}x{alto} en {salida}")
@@ -107,7 +162,15 @@ def main() -> int:
         escritor.release()
         cv2.destroyAllWindows()
 
-    print(f"{n} fotogramas, {n / args.fps:.1f} s")
+    segundos = n / args.fps
+    print(f"{n} fotogramas, {segundos:.1f} s")
+    if segundos < 60:
+        print(f"\nESO ES POCO. Con {segundos:.0f} s no salen fotogramas variados suficientes;")
+        print("la referencia son 2 o 3 minutos por objeto. Para repetir la toma:")
+        print(f"  .\\.venv\\Scripts\\python.exe scripts\\record_loads.py "
+              f"--nombre {args.nombre} --rehacer")
+        return 0
+
     print(f"\nahora:\n  .\\.venv\\Scripts\\python.exe scripts\\extract_load_frames.py "
           f'--video "{salida}" --fuente camara')
     return 0
