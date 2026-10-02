@@ -46,7 +46,11 @@ RAIZ = Path(__file__).resolve().parents[2]
 MODELO = RAIZ / "artifacts/modelo"
 
 TARGET_HZ = 10.0
-PREVIEW_WIDTH = 480
+# Ancho al que viaja la imagen de la camara. 480 bastaba cuando el panel era un
+# recuadro; con la consola ocupando la pantalla, el navegador la estaba AMPLIANDO y
+# se veia blanda. Medido sobre fotogramas reales: a 720 px el redimensionado mas el
+# JPEG cuestan 7,4 ms y 387 KB/s a 10 Hz, dentro de un ciclo que usa 34 de 100 ms.
+PREVIEW_WIDTH = 720
 
 # Cuantas medidas de escala se guardan para quedarse con la mayor. A 10 Hz y una
 # busqueda de carga cada 3 fotogramas, 20 son unos 6 segundos: lo que tarda un
