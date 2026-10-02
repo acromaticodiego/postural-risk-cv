@@ -61,6 +61,24 @@ ESCALA_VENTANA = 20
 # rompería la ventana de 2 s con la que se entrenó el modelo de tareas.
 LOAD_EVERY = 3
 
+# Cuantos fotogramas seguidos por debajo del umbral se toleran DENTRO de una racha
+# antes de darla por terminada.
+#
+# Sin esto el sistema no cerraba ni un evento en un video de alguien levantando
+# cajas, y no por no ver el riesgo: 65 de 128 fotogramas pasaban de REBA 4. El
+# puntaje parpadea entre 3 y 4 —"6 4 4 4 3 4 4 3 4 4 3 6 3 4..."— y un solo
+# fotograma en 3 reiniciaba la racha entera, asi que la mas larga duraba 0,9 s
+# contra el 1,0 s que pide la norma de este sistema. Fallaba por un fotograma.
+#
+# Medido sobre esa serie: con 0 de tolerancia salen 0 eventos, con 1 sale 1, y con 2
+# salen 2. Se eligen 2 (0,2 s) porque un fotograma suelto por debajo es temblor del
+# detector de pose, no que la persona se haya erguido y vuelto a agachar en una
+# decima. Pasar de ahi empieza a fundir levantamientos distintos en uno.
+#
+# El tiempo tolerado SI cuenta en la duracion del evento, porque la postura de
+# riesgo no se interrumpio de verdad: lo que fallo fue la medida.
+EVENT_GAP_FRAMES = 2
+
 
 @dataclass
 class LiveEvent:
@@ -139,6 +157,7 @@ class LiveSession:
         self.seconds_by_level: dict[str, float] = {}
         self.events: list[LiveEvent] = []
         self._streak: list[tuple[int, str]] = []
+        self._streak_gap = 0
         self._streak_poses: list[np.ndarray] = []
         self._streak_tasks: list[str] = []
         self._streak_loads: list[np.ndarray | None] = []
@@ -526,6 +545,16 @@ class LiveSession:
                 self._streak_tasks = []
                 self._streak_loads = []
             peor = max(componentes, key=componentes.get) if componentes else "trunk"
+            # Los fotogramas tolerados se reincorporan a la racha con el ultimo valor
+            # conocido: su riesgo no fue menor, fue mal medido, y descontarlos de la
+            # duracion haria que un evento de 1,2 s se publicara como de 1,0.
+            if self._streak_gap and self._streak:
+                self._streak.extend([self._streak[-1]] * self._streak_gap)
+                self._streak_tasks.extend([self._streak_tasks[-1]] * self._streak_gap)
+                self._streak_loads.extend([self._streak_loads[-1]] * self._streak_gap)
+                if self._streak_poses:
+                    self._streak_poses.extend([self._streak_poses[-1]] * self._streak_gap)
+            self._streak_gap = 0
             self._streak.append((reba, peor))
             if keypoints is not None:
                 self._streak_poses.append(keypoints)
@@ -535,6 +564,11 @@ class LiveSession:
             )
             return
         if self._streak:
+            # Un fotograma por debajo no cierra el tramo: se espera a ver si vuelve.
+            if self._streak_gap < EVENT_GAP_FRAMES:
+                self._streak_gap += 1
+                return
+            self._streak_gap = 0
             duracion = len(self._streak) / TARGET_HZ
             if duracion >= self.config.min_event_seconds:
                 picos = [r for r, _ in self._streak]
@@ -588,6 +622,7 @@ class LiveSession:
                     )
                 )
             self._streak = []
+            self._streak_gap = 0
             self._streak_poses = []
             self._streak_tasks = []
             self._streak_loads = []

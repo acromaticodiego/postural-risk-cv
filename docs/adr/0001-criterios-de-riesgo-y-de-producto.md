@@ -53,6 +53,41 @@ Son dos cosas distintas y tratarlas como una era el error de la pregunta origina
 La norma usa «más de un minuto» para clasificar una postura como estática, que es
 otra pregunta; con ese umbral no se contaría ni un levantamiento.
 
+#### Enmienda del 2026-10-02: el segundo tiene que ser SOSTENIDO, no CONSECUTIVO
+
+Aprobado por Juan Diego tras verlo fallar en una prueba en vivo. Con la regla tal
+como estaba escrita, un vídeo de 13 segundos de alguien levantando cajas cerró
+**cero eventos** — y no por no ver el riesgo: 65 de 128 fotogramas pasaban de REBA
+4. El puntaje parpadea alrededor del umbral:
+
+```
+6 4 4 4 3 4 4 3 4 4 3 6 3 4 3 3 4 3 3 3 ...
+```
+
+Un solo fotograma en 3 reiniciaba la racha entera, así que la más larga duraba
+**0,9 s** contra el 1,0 s exigido. Fallaba por un fotograma, y el fallo no era de la
+persona ni de la norma: era del instrumento. Un fotograma suelto por debajo es
+temblor del detector de pose, no que alguien se haya erguido y vuelto a agachar en
+una décima de segundo.
+
+Así que una racha admite **hasta 2 fotogramas (0,2 s) por debajo del umbral** sin
+cerrarse. Medido sobre esa misma serie: con 0 de tolerancia salen 0 eventos, con 1
+sale 1, y con 2 salen 2. Se para en 2 porque a partir de ahí se empiezan a fundir
+levantamientos distintos en uno, y entonces la duración publicada sería falsa.
+
+El tiempo tolerado **sí cuenta** en la duración del evento: la postura de riesgo no
+se interrumpió, lo que falló fue la medida, y descontarlo publicaría 1,0 s donde
+hubo 1,2.
+
+**Lo que esto NO cambia:** la exposición acumulada del informe sigue sin mínimo y
+sin tolerancia, porque ahí se cuenta fotograma a fotograma y no hay rachas que
+romper. La enmienda toca solo la bandeja de alertas.
+
+**La salvaguarda, comprobada:** hay dos pruebas y la tolerancia se rompió en las dos
+direcciones. Con 0 cae la del parpadeo; con 12 cae además la que exige que una pausa
+de verdad —un segundo entero sin riesgo— siga cerrando el evento, que es lo que
+impide que dos levantamientos seguidos se publiquen como uno.
+
 ### 3. El sistema se inclina a NO dar falsas alarmas, y publica su tasa
 
 Un sistema de seguridad que avisa mal se desconecta el primer día, y una vez
