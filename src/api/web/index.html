@@ -233,7 +233,14 @@ body.consola-activa #vista{flex:1;min-height:0;display:flex;flex-direction:colum
    con su propio scroll. Es lo unico que crece sin parar, asi que es lo unico que se
    mueve — la ventana no. */
 .lateral{min-height:186px;display:grid;
-  grid-template-columns:minmax(0,1.25fr) 215px minmax(0,1fr) minmax(0,1.15fr);gap:10px;align-items:stretch}
+  grid-template-columns:minmax(0,1.1fr) 205px minmax(0,1.35fr) minmax(0,1fr);
+  gap:10px;align-items:stretch}
+/* En la consola, los avisos y el consejo comparten una columna de alto fijo, asi que
+   van sin los margenes de la version de pagina: dos avisos a la vez con los margenes
+   de antes se salian de la franja. */
+.lateral .aviso{margin:0;display:block;padding:5px 9px;line-height:1.35}
+.lateral .recomendacion{margin:0;padding:9px 12px}
+.lateral .recomendacion h3{margin-bottom:5px}
 .lateral > *{overflow-y:auto;min-height:0}
 .bloque{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
   padding:11px 13px}
@@ -605,12 +612,12 @@ function vistaEnVivo(){
   marcador.append(puntaje, textoNivel);
 
   const tarea = el("div",{className:"tarea-viva",textContent:"—"});
-  const avisoTarea = el("div",{className:"aviso",style:"display:none;margin-top:6px"});
-  const avisoVista = el("div",{className:"aviso",style:"display:none;margin-top:6px"});
+  const avisoTarea = el("div",{className:"aviso",style:"display:none"});
+  const avisoVista = el("div",{className:"aviso",style:"display:none"});
   const carga = el("div",{className:"carga-viva",style:"display:none"});
   const columnaTexto = el("div",{className:"columna-texto"});
   columnaTexto.append(el("div",{className:"etiqueta",textContent:"Tarea reconocida"}),
-                      tarea, avisoTarea, avisoVista, carga);
+                      tarea, carga);
   rail.append(marcador, columnaTexto);
 
   // Los componentes van en su PROPIA columna de la franja. Debajo del marcador se
@@ -658,8 +665,12 @@ function vistaEnVivo(){
   // Dos columnas de verdad: el consejo y NIOSH a un lado, los eventos al otro. Sin
   // agruparlos, el div vacio de NIOSH ocupaba una columna entera y los eventos se
   // apilaban debajo del consejo dejando media franja en negro.
-  const columnaConsejo = el("div",{style:"display:flex;flex-direction:column;gap:12px"});
-  columnaConsejo.append(consejo, nioshVivo);
+  // Los avisos —angulo no entrenado, camara de frente, oclusion— viven AQUI y no
+  // junto al marcador. Son de largo variable: dos a la vez empujaban la tarea y la
+  // carga fuera de la franja, y eso es lo que se veia montado. Ademas encajan mejor
+  // aqui, porque son mensajes al operario igual que el consejo de tecnica.
+  const columnaConsejo = el("div",{style:"display:flex;flex-direction:column;gap:6px"});
+  columnaConsejo.append(avisoTarea, avisoVista, consejo, nioshVivo);
   lateral.append(columnaConsejo, cajaEventos);
 
   lateral.prepend(rail, bloqueComps);
