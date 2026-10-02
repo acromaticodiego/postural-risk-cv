@@ -20,11 +20,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.baseline.niosh import (  # noqa: E402
     LOAD_CONSTANT_KG,
+    _pixels_per_cm,
     analyze_lift,
     asymmetry_multiplier,
     distance_multiplier,
     frequency_multiplier,
     horizontal_multiplier,
+    pixels_per_cm_from_sequence,
     vertical_multiplier,
 )
 from src.baseline.reba import reba_from_keypoints  # noqa: E402
@@ -77,6 +79,70 @@ def _destino() -> np.ndarray:
         left_knee=(_PIES_X - 5, 480), right_knee=(_PIES_X + 15, 480),
         left_ankle=(_PIES_X - 5, 640), right_ankle=(_PIES_X + 15, 640),
     )
+
+
+# --- la escala, que es de donde salen todos los centímetros -------------------
+
+
+def test_bending_shrinks_the_body_in_the_image_but_not_the_person() -> None:
+    """La misma persona, a la misma distancia, da escalas distintas según se agache.
+
+    Es el fallo que obliga a tomar la escala de la secuencia y no del fotograma: medir
+    de la coronilla al tobillo mide la PROYECCIÓN del cuerpo, y esa se encoge al
+    doblarse. Medido en una grabación real del 2026-10-02, 2,16 a 4,41 px/cm en el
+    mismo vídeo.
+    """
+    agachado = _origen(distancia_horizontal_px=160.0)[0]
+    erguido = _destino()[0]
+    assert _pixels_per_cm(agachado, 170.0) < _pixels_per_cm(erguido, 170.0)
+
+
+def test_the_scale_of_a_lift_comes_from_its_most_upright_frame() -> None:
+    """Y no del fotograma de origen, que es el más agachado del evento — justo el peor
+    sitio para preguntarle la escala al cuerpo, y justo donde NIOSH mide todo lo demás."""
+    secuencia = _secuencia(_origen(distancia_horizontal_px=160.0), _destino())
+    de_la_secuencia = pixels_per_cm_from_sequence(secuencia, 170.0)
+    del_origen = _pixels_per_cm(secuencia[0], 170.0)
+    assert de_la_secuencia > del_origen
+    assert de_la_secuencia == max(_pixels_per_cm(k, 170.0) for k in secuencia)
+
+
+def test_a_single_frame_still_works() -> None:
+    uno = _destino()[0]
+    assert pixels_per_cm_from_sequence(uno, 170.0) == _pixels_per_cm(uno, 170.0)
+
+
+def test_the_lift_analysis_actually_uses_the_sequence_scale() -> None:
+    """Y esta es la que protege de verdad.
+
+    Las dos de arriba comprueban la FUNCIÓN de la escala; revertir `analyze_lift` para
+    que volviera a tomarla del fotograma de origen las dejaba a las dos en verde. Una
+    prueba que sigue pasando cuando rompes lo que dice proteger no está protegiendo
+    nada, y en este proyecto ya van cuatro veces.
+
+    Aquí se comprueba el resultado: las distancias que publica `analyze_lift` tienen
+    que salir de la escala de la secuencia, no de la del origen. Con la escala del
+    origen —más pequeña, porque la persona está doblada— los centímetros salen
+    inflados por el mismo factor.
+    """
+    secuencia = _secuencia(_origen(distancia_horizontal_px=160.0), _destino())
+    analisis = analyze_lift(secuencia, HZ, worker_height_cm=170.0, load_kg=10.0)
+
+    escala_secuencia = pixels_per_cm_from_sequence(secuencia, 170.0)
+    escala_origen = _pixels_per_cm(secuencia[0], 170.0)
+    assert escala_origen < escala_secuencia, "sin esto la prueba no distingue nada"
+
+    manos = secuencia[:, [JOINT["left_wrist"], JOINT["right_wrist"]], :].mean(axis=1)
+    i = int(np.argmax(manos[:, 1]))
+    pies_x = float(
+        np.mean(secuencia[i][[JOINT["left_ankle"], JOINT["right_ankle"]], 0])
+    )
+    distancia_px = abs(float(manos[i, 0]) - pies_x)
+
+    bien = distancia_px / escala_secuencia
+    mal = distancia_px / escala_origen
+    assert abs(analisis.horizontal_cm - bien) < 0.5
+    assert abs(analisis.horizontal_cm - mal) > 1.0
 
 
 # --- la prueba que justifica el módulo ---------------------------------------

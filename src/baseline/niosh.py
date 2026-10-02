@@ -148,12 +148,39 @@ def frequency_multiplier(lifts_per_min: float) -> float:
 # --- de esqueleto a centímetros ----------------------------------------------
 
 
+def pixels_per_cm_from_sequence(keypoints_sequence: np.ndarray, worker_height_cm: float) -> float:
+    """La escala de una secuencia, tomada del fotograma donde la persona está MÁS ERGUIDA.
+
+    Esto no es un refinamiento: arregla un error de hasta 2×. La escala sale de medir
+    de la coronilla al tobillo, y **ese tramo se encoge al agacharse**; el cuerpo mide
+    lo mismo y su proyección en la imagen no. Medido sobre una grabación real de 67
+    fotogramas (2026-10-02), la escala va de 2,16 a 4,41 px/cm en el mismo vídeo, con
+    la misma persona y a la misma distancia —erguido 3,45, agachado 2,30—, así que un
+    objeto medido agachado sale **1,5× más grande** de lo que es.
+
+    Y la equivocación sale más cara de lo que parece, porque NIOSH mide en el ORIGEN
+    del levantamiento, que es por definición el fotograma más agachado: el peor
+    momento posible para preguntarle la escala al cuerpo.
+
+    La persona es la misma durante todo el evento, así que su escala también: se toma
+    del fotograma donde su proyección es mayor. Eso vale dentro de un evento, que dura
+    segundos. Sobre una sesión entera NO valdría, porque acercarse a la cámara cambia
+    la escala de verdad — por eso esta función recibe una secuencia y no un histórico.
+    """
+    if keypoints_sequence.ndim == 2:
+        return _pixels_per_cm(keypoints_sequence, worker_height_cm)
+    return max(_pixels_per_cm(k, worker_height_cm) for k in keypoints_sequence)
+
+
 def _pixels_per_cm(keypoints: np.ndarray, worker_height_cm: float) -> float:
-    """La escala, usando el cuerpo como regla.
+    """La escala de UN fotograma, usando el cuerpo como regla.
 
     Se mide de la coronilla al tobillo, no la caja entera: la caja crece cuando la
     persona extiende un brazo, y entonces la misma persona daría dos escalas
     distintas en dos fotogramas seguidos.
+
+    Sirve para un fotograma erguido. Para una secuencia hay que usar
+    `pixels_per_cm_from_sequence`, y el motivo está escrito ahí.
     """
     tobillos = keypoints[[JOINT["left_ankle"], JOINT["right_ankle"]], 1]
     suelo = float(np.max(tobillos))
@@ -203,7 +230,9 @@ def analyze_lift(
     destino = int(np.argmin(manos[:, 1]))
 
     esqueleto = keypoints_sequence[origen]
-    px_cm = _pixels_per_cm(esqueleto, altura)
+    # La escala NO se toma del fotograma de origen aunque todo lo demás sí: el origen
+    # es el más agachado del evento y ahí el cuerpo mide menos en la imagen.
+    px_cm = pixels_per_cm_from_sequence(keypoints_sequence, altura)
 
     tobillos = esqueleto[[JOINT["left_ankle"], JOINT["right_ankle"]], :]
     suelo_y = float(np.max(tobillos[:, 1]))

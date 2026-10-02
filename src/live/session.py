@@ -48,6 +48,11 @@ MODELO = RAIZ / "artifacts/modelo"
 TARGET_HZ = 10.0
 PREVIEW_WIDTH = 480
 
+# Cuantas medidas de escala se guardan para quedarse con la mayor. A 10 Hz y una
+# busqueda de carga cada 3 fotogramas, 20 son unos 6 segundos: lo que tarda un
+# levantamiento completo, y poco para que alguien cambie de distancia a la camara.
+ESCALA_VENTANA = 20
+
 # Cada cuántos fotogramas se busca la carga. Dos modelos en la ruta crítica no caben
 # en 100 ms: la pose sola cuesta ~74 ms en una RTX 3050 y el detector de carga añade
 # lo suyo. Una caja en las manos no se mueve de sitio en 300 ms —va pegada a la
@@ -148,6 +153,7 @@ class LiveSession:
 
             self.load_detector = LoadDetector(str(load_weights), device=self.device)
             self.load_weights = Path(load_weights)
+        self._escalas: list[float] = []
         self._last_load = None
         self._streak_start = 0.0
         self._last_task = "—"
@@ -363,7 +369,7 @@ class LiveSession:
             return
         px_cm = None
         if self.config.worker_height_cm:
-            px_cm = _pixels_per_cm(keypoints, self.config.worker_height_cm)
+            px_cm = self._escala(keypoints)
         self._last_load = build_load(
             cajas[indice],
             float(confianzas[indice]),
@@ -371,6 +377,26 @@ class LiveSession:
             tuple(self.config.load_catalog) or None,
             poligonos[indice] if indice < len(poligonos) else None,
         )
+
+    def _escala(self, keypoints: np.ndarray) -> float:
+        """Píxeles por centímetro, tomados de lo más erguido que se le haya visto hace poco.
+
+        La escala sale de medir de la coronilla al tobillo, y ese tramo **se encoge al
+        agacharse**: la persona mide lo mismo y su proyección no. Medido sobre una
+        grabación real (2026-10-02, 67 fotogramas), va de 2,16 a 4,41 px/cm en el mismo
+        vídeo, así que una caja medida agachado sale 1,5× más grande — y el momento en
+        que alguien levanta una caja es justo el momento en que está agachado.
+
+        Por eso se guarda el máximo de una VENTANA de unos segundos y no de la sesión
+        entera: dentro de unos segundos la persona no ha cambiado de distancia a la
+        cámara, y a lo largo de un turno sí — y entonces el máximo histórico sería la
+        escala de cuando pasó más cerca, que es otro error con el mismo disfraz.
+        """
+        actual = _pixels_per_cm(keypoints, self.config.worker_height_cm)
+        self._escalas.append(actual)
+        if len(self._escalas) > ESCALA_VENTANA:
+            self._escalas.pop(0)
+        return max(self._escalas)
 
     def _technique(self, datos) -> dict:
         """El consejo de técnica: qué hacer distinto, o que ya está bien hecho.
