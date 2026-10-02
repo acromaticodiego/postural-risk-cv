@@ -130,11 +130,24 @@ class LiveSession:
 
         # El detector de carga es opcional: sin él, el sistema funciona igual y
         # NIOSH mide a las muñecas en vez de al centro de la caja.
+        #
+        # Y si no se dice cuál, gana el de la planta sobre el de fábrica. Ese orden ES
+        # la decisión de producto del ADR 0002 escrita en una línea de código: el
+        # modelo viene de fábrica y cada cliente lo calibra con sus cargas, así que en
+        # cuanto existe un modelo calibrado para esta planta, es el que manda.
+        if load_weights is None:
+            for candidato in (model_dir / "carga-cliente.pt", model_dir / "carga.pt"):
+                if candidato.exists():
+                    load_weights = candidato
+                    break
+
         self.load_detector = None
+        self.load_weights: Path | None = None
         if load_weights and Path(load_weights).exists():
             from ..load.carga import LoadDetector
 
             self.load_detector = LoadDetector(str(load_weights), device=self.device)
+            self.load_weights = Path(load_weights)
         self._last_load = None
         self._streak_start = 0.0
         self._last_task = "—"
