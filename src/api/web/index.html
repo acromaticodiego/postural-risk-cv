@@ -175,7 +175,12 @@ body.consola-activa #vista{flex:1;min-height:0;display:flex;flex-direction:colum
    la resolucion a la que el servidor manda la imagen (PREVIEW_WIDTH). Estirarlo mas
    —82/18 da 760, 86/14 da 801— solo consigue que el navegador vuelva a ampliar una
    imagen de 720, que es el problema que veniamos de arreglar, y ademas le come la
-   pantalla al marcador. */
+   pantalla al marcador.
+
+   El 22% lleva un SUELO en pixeles porque es un porcentaje y en una pantalla de
+   portatil se quedaba en 109 px cuando el contenido pide 167: medido en el DOM,
+   ahi se cortaban los componentes, el consejo y el marcador a la vez, que es lo
+   que se ve como "montado". Por debajo de ese suelo lo que cede es el video. */
 .consola{flex:1;min-height:0;display:grid;
   grid-template-rows:78fr 22fr;gap:10px;padding:8px 14px 12px}
 .consola > *{min-height:0;min-width:0}
@@ -186,14 +191,18 @@ body.consola-activa #vista{flex:1;min-height:0;display:flex;flex-direction:colum
 .rail::-webkit-scrollbar-thumb,.lateral::-webkit-scrollbar-thumb{
   background:var(--borde);border-radius:4px}
 
-.marcador-grande{display:flex;align-items:baseline;gap:10px;
-  padding-bottom:8px;border-bottom:1px solid var(--borde);margin-bottom:9px}
-.marcador-grande .cifra{font-size:52px;font-weight:600;line-height:.9;
+.rail.horizontal{flex-direction:row;gap:14px;align-items:flex-start}
+.marcador-grande{display:flex;flex-direction:column;align-items:flex-start;gap:0;
+  padding:0 14px 0 0;border-right:1px solid var(--borde);border-bottom:0;margin:0;
+  flex:none}
+.marcador-grande .cifra{font-size:54px;font-weight:600;line-height:.95;
   font-variant-numeric:tabular-nums}
 .marcador-grande .texto{display:flex;flex-direction:column}
-.marcador-grande .nivel{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;
+.marcador-grande .nivel{font-size:12.5px;letter-spacing:1.4px;text-transform:uppercase;
   font-weight:600}
-.marcador-grande .umbral{font-size:11px;color:var(--tenue)}
+.marcador-grande .umbral{font-size:10.5px;color:var(--tenue)}
+.rail .columna-texto{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.rail .carga-viva{margin-top:6px}
 
 /* Los paneles se dimensionan por ALTO y el ancho sale de la proporcion de la camara,
    asi que quedan tan grandes como la pantalla permita sin desbordarla, y centrados. */
@@ -223,8 +232,8 @@ body.consola-activa #vista{flex:1;min-height:0;display:flex;flex-direction:colum
 /* La franja de abajo: el consejo a la izquierda y los eventos a la derecha, cada uno
    con su propio scroll. Es lo unico que crece sin parar, asi que es lo unico que se
    mueve — la ventana no. */
-.lateral{min-height:0;display:grid;
-  grid-template-columns:250px 230px minmax(0,1fr) minmax(0,1.2fr);gap:10px;align-items:stretch}
+.lateral{min-height:186px;display:grid;
+  grid-template-columns:minmax(0,1.25fr) 215px minmax(0,1fr) minmax(0,1.15fr);gap:10px;align-items:stretch}
 .lateral > *{overflow-y:auto;min-height:0}
 .bloque{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
   padding:11px 13px}
@@ -586,7 +595,7 @@ function vistaEnVivo(){
   // --- columna 1: el marcador. Es lo que decide el sistema, y por eso es lo
   // primero que se lee: en el video de demostracion el REBA tiene que verse a la
   // vez que el cuerpo que lo produce.
-  const rail = el("div",{className:"rail"});
+  const rail = el("div",{className:"rail horizontal"});
   const marcador = el("div",{className:"marcador-grande"});
   const puntaje = el("div",{className:"cifra",textContent:"—"});
   const textoNivel = el("div",{className:"texto"});
@@ -599,9 +608,10 @@ function vistaEnVivo(){
   const avisoTarea = el("div",{className:"aviso",style:"display:none;margin-top:6px"});
   const avisoVista = el("div",{className:"aviso",style:"display:none;margin-top:6px"});
   const carga = el("div",{className:"carga-viva",style:"display:none"});
-  rail.append(marcador,
-              el("div",{className:"etiqueta",textContent:"Tarea reconocida"}),
-              tarea, avisoTarea, avisoVista, carga);
+  const columnaTexto = el("div",{className:"columna-texto"});
+  columnaTexto.append(el("div",{className:"etiqueta",textContent:"Tarea reconocida"}),
+                      tarea, avisoTarea, avisoVista, carga);
+  rail.append(marcador, columnaTexto);
 
   // Los componentes van en su PROPIA columna de la franja. Debajo del marcador se
   // salian por abajo, y son justo lo que explica de donde sale el puntaje: el panel
