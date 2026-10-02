@@ -7,6 +7,13 @@ __pycache__/
 data/raw/
 data/keypoints/
 
+# El material de afinado del detector de carga: vídeos propios, fotogramas, máscaras,
+# la hoja de contactos de revisión y el dataset que se arma para entrenar. Son
+# imágenes de personas y no entran al repositorio bajo ningún concepto. Se regeneran
+# con scripts/extract_load_frames.py y scripts/prelabel_sam.py.
+data/carga/
+data/carga_ensayo/
+
 # Pesos de modelos: los de ultralytics se descargan solos, los entrenados son
 # artefactos de una corrida concreta y se citan por su registro, no por el repo.
 *.pt
