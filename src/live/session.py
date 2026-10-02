@@ -115,6 +115,7 @@ class LiveSession:
         # alguien plantado frente al portátil.
         self.pose = None
         self.capture = None
+        self._descartar = 0
         if camera is not None:
             from ultralytics import YOLO
 
@@ -122,6 +123,15 @@ class LiveSession:
             self.capture = cv2.VideoCapture(camera)
             if not self.capture.isOpened():
                 raise RuntimeError(f"no se pudo abrir la cámara {camera}")
+            # El ciclo consume 10 fotogramas por segundo y la cámara produce 30: los
+            # otros 20 se quedan en el búfer del driver, que es una COLA. A los diez
+            # segundos se van doscientos fotogramas de retraso y lo que se ve en
+            # pantalla es lo que pasó hace siete segundos. No es lentitud de cómputo
+            # —el ciclo mide 34 ms de 100 disponibles— sino latencia acumulada, y se
+            # nota exactamente igual.
+            self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            fps_camara = self.capture.get(cv2.CAP_PROP_FPS) or 30.0
+            self._descartar = max(0, int(round(fps_camara / TARGET_HZ)) - 1)
 
         self.buffer: deque[np.ndarray] = deque(maxlen=self.window_frames)
         self.started = time.perf_counter()
@@ -161,7 +171,19 @@ class LiveSession:
     # --- ciclo -------------------------------------------------------------
 
     def read(self):
-        """Un fotograma: (imagen, keypoints, caja, confianzas) o todo None."""
+        """Un fotograma: (imagen, keypoints, caja, confianzas) o todo None.
+
+        Se descartan los fotogramas que la cámara ha producido mientras se procesaba
+        el anterior. `grab()` los saca de la cola sin decodificarlos, que cuesta una
+        fracción de lo que cuesta `read()`; sin esto la imagen va acumulando retraso
+        indefinidamente y el sistema parece lento cuando lo que está es desfasado.
+
+        Y se descartan en vez de procesarlos porque la tasa de 10 Hz es parte del
+        contrato del modelo: la ventana de 2 s con la que se entrenó son 20 fotogramas
+        y alimentarlo más deprisa le daría el gesto acelerado.
+        """
+        for _ in range(self._descartar):
+            self.capture.grab()
         ok, frame = self.capture.read()
         if not ok:
             return None, None, None, None
@@ -364,14 +386,6 @@ class LiveSession:
         """
         escala = PREVIEW_WIDTH / frame.shape[1]
         pequeno = cv2.resize(frame, (PREVIEW_WIDTH, int(frame.shape[0] * escala)))
-        if self._last_load is not None:
-            contorno = self._last_load.polygon
-            if contorno:
-                puntos = (np.asarray(contorno, dtype=np.float32) * escala).astype(int)
-                cv2.polylines(pequeno, [puntos], True, (60, 180, 255), 2, cv2.LINE_AA)
-            else:
-                x0, y0, x1, y1 = (int(v * escala) for v in self._last_load.box)
-                cv2.rectangle(pequeno, (x0, y0), (x1, y1), (60, 180, 255), 2)
         if keypoints is not None:
             from ..viz.render import HUESOS
             from ..pose.schema import JOINT
@@ -386,6 +400,28 @@ class LiveSession:
                 if (p == 0).all():
                     continue
                 cv2.circle(pequeno, tuple(p.astype(int)), 3, (120, 220, 90), -1, cv2.LINE_AA)
+        # La carga se dibuja DESPUES del esqueleto: al reves, la linea verde del
+        # cuerpo cruzaba por encima de la etiqueta y la dejaba a medias leer.
+        if self._last_load is not None:
+            contorno = self._last_load.polygon
+            if contorno:
+                puntos = (np.asarray(contorno, dtype=np.float32) * escala).astype(int)
+                cv2.polylines(pequeno, [puntos], True, (60, 180, 255), 2, cv2.LINE_AA)
+            else:
+                x0, y0, x1, y1 = (int(v * escala) for v in self._last_load.box)
+                cv2.rectangle(pequeno, (x0, y0), (x1, y1), (60, 180, 255), 2)
+            # La etiqueta con la confianza, no solo el contorno. Un contorno sin
+            # nombre obliga a quien mira la demo a adivinar si el sistema sabe QUÉ ha
+            # visto o solo que hay algo ahí; y la confianza al lado es lo que hace
+            # creíble el umbral de 0,50 cuando alguien pregunte por él.
+            x0, y0 = (int(v * escala) for v in self._last_load.box[:2])
+            texto = f"caja {self._last_load.confidence:.2f}"
+            (ancho_t, alto_t), _ = cv2.getTextSize(texto, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+            y0 = max(y0, alto_t + 8)
+            cv2.rectangle(pequeno, (x0, y0 - alto_t - 7), (x0 + ancho_t + 8, y0 - 1), (60, 180, 255), -1)
+            cv2.putText(pequeno, texto, (x0 + 4, y0 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                        (20, 20, 20), 1, cv2.LINE_AA)
+
         ok, buffer = cv2.imencode(".jpg", pequeno, [cv2.IMWRITE_JPEG_QUALITY, 70])
         return base64.b64encode(buffer).decode("ascii") if ok else ""
 

@@ -132,6 +132,16 @@ input[type=range]{flex:1;accent-color:var(--acento)}
 .carga-viva{margin-top:10px;font-size:12.5px;border-left:3px solid var(--acento);
   padding-left:10px;line-height:1.7}
 .carga-viva .tenue{color:var(--tenue)}
+.ajustes-vivo{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:0 0 18px;
+  background:var(--panel);border:1px solid var(--borde);border-radius:10px;padding:12px 16px}
+.ajustes-vivo label{font-size:12.5px;color:var(--suave)}
+.ajustes-vivo input,.ajustes-vivo select{font:inherit;color:var(--texto);background:var(--panel2);
+  border:1px solid var(--borde);border-radius:6px;padding:5px 8px;width:76px;margin:0 4px}
+.ajustes-vivo select{width:auto}
+.ajustes-vivo button{background:var(--panel2);border:1px solid var(--borde);border-radius:6px;
+  padding:6px 14px}
+.ajustes-vivo button:hover{border-color:var(--acento)}
+.ajustes-vivo .nota{font-size:11.5px;color:var(--tenue);flex-basis:100%}
 .etiqueta{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--tenue)}
 </style>
 </head>
@@ -452,6 +462,24 @@ function vistaEnVivo(){
            el("div",{className:"sub",id:"estado-vivo",textContent:"Conectando con la cámara…"}));
 
   const dos = el("div",{className:"dos-vistas"});
+  // Lo que la camara NO puede ver se declara, no se adivina (ADR 0001). Hasta hoy
+  // el modo en vivo se conectaba sin un solo parametro, asi que el puesto salia
+  // "sin configurar" y la caja detectada no tenia escala con la que medirse: se
+  // dibujaba el contorno y no se podia decir cuanto media ni cuanto pesaba.
+  const ajustes = el("div",{className:"ajustes-vivo"});
+  ajustes.innerHTML = `
+    <label>Estatura <input id="v-altura" type="number" value="172" min="120" max="220"> cm</label>
+    <label>Peso de la carga <input id="v-peso" type="number" value="12" min="0" max="50" step="0.5"> kg</label>
+    <label>Agarre <select id="v-agarre">
+      <option value="good">bueno</option>
+      <option value="fair" selected>regular</option>
+      <option value="poor">malo</option>
+      <option value="unacceptable">inaceptable</option>
+    </select></label>
+    <button id="v-aplicar">Aplicar y reconectar</button>
+    <span class="nota">La camara no puede medir el peso ni el agarre: los declara quien conoce el puesto.</span>`;
+  v.append(ajustes);
+
   const izq = el("div",{className:"caja-vista",innerHTML:
     `<h3>Lo que capta la cámara</h3><div class="sello efimero">efímero</div>`});
   const img = el("img");
@@ -500,7 +528,14 @@ function vistaEnVivo(){
 
   const ctx = lienzo.getContext("2d");
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  socket = new WebSocket(`${proto}://${location.host}/ws/live`);
+  const params = () => new URLSearchParams({
+    id: "EN-VIVO", name: "Camara en vivo",
+    height_cm: document.getElementById("v-altura").value,
+    load_kg: document.getElementById("v-peso").value,
+    coupling: document.getElementById("v-agarre").value,
+  }).toString();
+  document.getElementById("v-aplicar").onclick = () => { if (socket) socket.close(); vistaVivo(); };
+  socket = new WebSocket(`${proto}://${location.host}/ws/live?${params()}`);
   socket.onmessage = ev => {
     const d = JSON.parse(ev.data);
     if (d.error){
@@ -549,6 +584,18 @@ function vistaEnVivo(){
         ctx.moveTo(q[0][0]*escala + dx, q[0][1]*escala + dy);
         for (let i = 1; i < q.length; i++) ctx.lineTo(q[i][0]*escala + dx, q[i][1]*escala + dy);
         ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+
+        // La etiqueta tambien aqui: esta vista es la que se conserva, y un contorno
+        // sin nombre no explica por si solo de donde salio el peso aplicado.
+        const xs = q.map(pt => pt[0]*escala + dx), ys = q.map(pt => pt[1]*escala + dy);
+        const bx = Math.min(...xs), by = Math.min(...ys);
+        const texto = "caja" + (d.load.width_cm ? ` · ${d.load.width_cm} cm` : "");
+        ctx.font = "11px ui-monospace, Consolas, monospace";
+        const w = ctx.measureText(texto).width;
+        ctx.fillStyle = css("--acento");
+        ctx.fillRect(bx, Math.max(by - 15, 0), w + 10, 14);
+        ctx.fillStyle = css("--fondo");
+        ctx.fillText(texto, bx + 5, Math.max(by - 4, 11));
       }
     } else {
       ctx.fillStyle = css("--suave"); ctx.font = "14px system-ui";
