@@ -78,11 +78,24 @@ def test_the_positive_point_goes_between_the_hands() -> None:
     assert aviso.labels[0] == 1
 
 
+def test_the_wrists_are_positives_too_so_the_mask_spans_the_whole_load() -> None:
+    """Con un solo positivo en medio, SAM se queda en el segmento más pequeño que lo
+    contenga: sobre un organizador con divisiones devolvía UN compartimento. Las
+    muñecas están sobre el objeto y en sus bordes, así que lo abarcan de lado a lado."""
+    kp, scores = _persona(manos=(320.0, 260.0))
+    aviso = build_prompt(kp, scores)
+    assert aviso is not None
+    assert aviso.positives == 3
+    positivos = [p for p, e in zip(aviso.points, aviso.labels) if e == 1]
+    assert [290.0, 260.0] in positivos  # muñeca izquierda
+    assert [350.0, 260.0] in positivos  # muñeca derecha
+
+
 def test_the_body_is_marked_as_not_the_load() -> None:
     kp, scores = _persona()
     aviso = build_prompt(kp, scores)
     assert aviso is not None
-    assert aviso.positives == 1
+    assert aviso.positives == 3
     # Nariz, dos hombros, dos caderas y dos rodillas.
     assert aviso.negatives == 7
 

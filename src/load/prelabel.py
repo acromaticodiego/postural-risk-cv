@@ -120,14 +120,30 @@ def build_prompt(
 ) -> Prompt | None:
     """Los puntos de aviso para SAM, sacados del esqueleto. None si no se puede.
 
-    El positivo va en el punto medio entre las muñecas, que es por donde se agarra
-    cualquier carga, y los negativos en las articulaciones del cuerpo que se vean con
-    confianza suficiente.
+    **TRES positivos: el punto medio entre las muñecas y las dos muñecas.** El punto
+    medio solo no basta y costó descubrirlo: con un único positivo SAM se queda en el
+    segmento coherente más pequeño que lo contenga, así que sobre un organizador con
+    divisiones dentro devolvía UN compartimento en vez de la caja. Las muñecas
+    arreglan eso por un motivo que es cierto siempre que haya carga: **al cargar algo,
+    las manos están SOBRE el objeto y en sus bordes**, así que obligan a la máscara a
+    abarcarlo de lado a lado. Medido sobre 97 fotogramas de una grabación real, la
+    máscara mediana pasa de 0,0131 a 0,0248 del fotograma y 63 de 97 crecen más de un
+    20%.
+
+    Los negativos van en las articulaciones del cuerpo que se vean con confianza
+    suficiente.
 
     Devolver None cuando las muñecas no se ven es la mitad del trabajo, y es
     deliberado que descarte fotogramas: la alternativa —poner el punto donde caiga—
     produce máscaras plausibles de cosas que no son la carga, y esas son las que se
     cuelan en la validación humana porque parecen correctas.
+
+    Y el efecto secundario, que es el que tiene que quedar dicho: cuando las manos van
+    VACÍAS, los positivos de las muñecas hacen que SAM segmente las manos o el brazo,
+    o sea máscaras más grandes y más equivocadas. No se compensa aquí: lo caza
+    `judge_mask`, y por eso al añadirlos bajó cuánto pasa el filtro (de 55 a 44 de 97)
+    mientras la calidad de lo que pasa subía. Un filtro que rechaza más no está
+    funcionando peor.
     """
     if keypoints.shape[0] != len(JOINT) or scores.shape[0] != len(JOINT):
         raise ValueError(f"se esperaban {len(JOINT)} articulaciones")
@@ -137,8 +153,12 @@ def build_prompt(
         return None
 
     centro = hands_center(keypoints)
-    puntos = [[float(centro[0]), float(centro[1])]]
-    etiquetas = [1]
+    puntos = [
+        [float(centro[0]), float(centro[1])],
+        [float(keypoints[izq, 0]), float(keypoints[izq, 1])],
+        [float(keypoints[der, 0]), float(keypoints[der, 1])],
+    ]
+    etiquetas = [1, 1, 1]
 
     for nombre in NEGATIVE_JOINTS:
         j = JOINT[nombre]

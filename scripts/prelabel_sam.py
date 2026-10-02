@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from datetime import date
 from pathlib import Path
@@ -91,8 +92,21 @@ def main() -> int:
     carpeta_frames = datos / "frames"
     carpeta_labels = datos / "labels"
     carpeta_revision = datos / "revision"
-    carpeta_labels.mkdir(parents=True, exist_ok=True)
-    carpeta_revision.mkdir(parents=True, exist_ok=True)
+    # Se vacían en cada corrida. Si no, una ejecución anterior deja etiquetas y
+    # miniaturas de fotogramas que ya no se proponen, y lo que una persona validó
+    # mirando las viejas no describe las nuevas. Una revisión que sobrevive al cambio
+    # que la invalida es peor que no tenerla.
+    for carpeta in (carpeta_labels, carpeta_revision):
+        if carpeta.exists():
+            shutil.rmtree(carpeta)
+        carpeta.mkdir(parents=True)
+
+    anterior = datos / "rechazadas.txt"
+    if anterior.exists():
+        caducada = datos / "rechazadas-caducada.txt"
+        anterior.replace(caducada)
+        print(f"AVISO: había una validación hecha y se ha apartado a {caducada.name}.")
+        print("       Las propuestas son otras, así que hay que volver a revisarlas.\n")
 
     from ultralytics import SAM
 
@@ -114,8 +128,14 @@ def main() -> int:
             rechazos.append({**_resumen(entrada), "motivo": "sin puntos de aviso utilizables"})
             continue
 
+        # Los puntos van ANIDADOS: `[[p1, p2, ...]]` es UN aviso con varios puntos, y
+        # `[p1, p2, ...]` son varios avisos de un punto cada uno. La diferencia no da
+        # error y cambia el resultado entero: con la forma plana, ultralytics devuelve
+        # una máscara por punto y los negativos no se aplican a nada — o sea que el
+        # mecanismo que justifica todo este módulo no estaba funcionando. Se descubrió
+        # porque SAM devolvía 7 máscaras para 7 puntos.
         resultado = sam.predict(
-            imagen, points=aviso.points, labels=aviso.labels, device=args.device, verbose=False
+            imagen, points=[aviso.points], labels=[aviso.labels], device=args.device, verbose=False
         )[0]
         if resultado.masks is None or not len(resultado.masks.data):
             rechazos.append({**_resumen(entrada), "motivo": "SAM no devolvió máscara"})
