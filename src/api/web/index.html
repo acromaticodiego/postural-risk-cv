@@ -165,8 +165,19 @@ body.consola-activa #vista{flex:1;min-height:0;display:flex;flex-direction:colum
 /* La fila de video manda y se lleva TODO el alto que sobre; la franja de abajo se
    queda con lo que pide su contenido. Al reves —video arriba con alto automatico— una
    camara de 4:3 hacia los paneles tan altos que echaban la franja fuera de pantalla. */
+/* El reparto del alto es FIJO y a favor del video: 78 contra 22. Con la fila de
+   abajo en `auto` se quedaba con lo que pedia su contenido y al video le sobraba
+   pantalla sin usar; con la de arriba en `auto` y una camara de 4:3, los paneles
+   salian tan altos que echaban la franja fuera de pantalla.
+   
+   El 78 no es un numero bonito, es donde para de servir: medido en el DOM a
+   1920x1030 con una camara de 4:3, cada cuadro queda en 720x540, que es EXACTAMENTE
+   la resolucion a la que el servidor manda la imagen (PREVIEW_WIDTH). Estirarlo mas
+   —82/18 da 760, 86/14 da 801— solo consigue que el navegador vuelva a ampliar una
+   imagen de 720, que es el problema que veniamos de arreglar, y ademas le come la
+   pantalla al marcador. */
 .consola{flex:1;min-height:0;display:grid;
-  grid-template-rows:minmax(0,1fr) auto;gap:10px;padding:8px 14px 12px}
+  grid-template-rows:78fr 22fr;gap:10px;padding:8px 14px 12px}
 .consola > *{min-height:0;min-width:0}
 
 .rail{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
