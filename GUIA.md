@@ -56,12 +56,12 @@ neutra—, que es una cifra en la que la visión siempre aporta. Mientras tanto,
 puesto de la demo se configuró sin `sudden_load` para que no saliera el 100% del
 tiempo en rojo.
 
-## DÓNDE ESTAMOS (actualizado 2026-09-30)
+## DÓNDE ESTAMOS (actualizado 2026-10-02)
 
 **El sistema está completo de punta a punta y funcionando**: vídeo → esqueletos →
 riesgo según REBA → peso aceptable según NIOSH → tarea reconocida por el modelo →
-informe accionable → panel web con modo en vivo. **106 pruebas en verde**, 30
-commits.
+informe accionable → panel web con modo en vivo. **126 pruebas en verde**, 33
+commits, y el README ya existe.
 
 ```powershell
 Set-Location C:\Users\ASUS\Desktop\pose_stimation
@@ -80,6 +80,7 @@ Set-Location C:\Users\ASUS\Desktop\pose_stimation
 | `src/baseline/rules.py` | la línea base sin aprendizaje: el número a batir |
 | `src/models/tcn.py` | el TCN causal que reconoce la tarea |
 | `src/load/carga.py` | la fusión de persona y carga (detector entrenado, sin validar) |
+| `src/load/prelabel.py` | SAM guiado por el esqueleto y los filtros que deciden qué máscara vale |
 | `src/product/` | puesto de trabajo, exposición, informe por tareas, pipeline |
 | `src/api/` | FastAPI + panel web, con modo en vivo por WebSocket |
 | `src/eval/` | partición por sujeto, métricas, arnés común |
@@ -123,11 +124,35 @@ Cuatro vídeos de Juan Diego probando el sistema en su salón. Cada uno destapó
 
 ## LO QUE TIENES QUE HACER AHORA
 
-Las tres decisiones de criterio están tomadas y escritas en el ADR 0001. El
-dataset, el modelo, el panel y el modo en vivo funcionan. Lo que queda abierto, por
-orden:
+**Una sola cosa, y sin ella no avanza nada de la carga: grabar dos o tres vídeos con
+la cámara en crudo.** Todo lo demás está montado y esperando material.
 
-### 1. La detección de carga, a medio camino
+```powershell
+.\.venv\Scripts\python.exe scripts\record_loads.py --nombre carga_lateral
+# q o Esc para parar. Un nombre por objeto, un vídeo por objeto.
+```
+
+Qué grabar importa más que el guion, y está entero en la cabecera del fichero: **la
+carga de verdad**, **dos o tres objetos distintos y cada uno en su propio vídeo**
+—la partición del afinado es por vídeo—, **levantando, cargando y soltando**, desde
+el suelo y desde una mesa, y **de lado**, que es además la única vista desde la que
+REBA se puede medir. Dos o tres minutos por vídeo basta: de 50 segundos salieron 138
+fotogramas candidatos.
+
+Después, y eso ya es una tarde:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\extract_load_frames.py --video "data\carga\videos\carga_lateral.mp4" --fuente camara
+.\.venv\Scripts\python.exe scripts\prelabel_sam.py                 # SAM propone
+# abrir data\carga\revision.html, descartar las malas, guardar ahí rechazadas.txt
+.\.venv\Scripts\python.exe scripts\finetune_load.py --val-video carga_lateral
+```
+
+El último es un entrenamiento y **lo lanzas tú**, como todos. El lote por defecto es
+16, el mismo con el que entrenaste el modelo base, y en la 3050 de 6 GB no cabe mucho
+más; `--batch` está expuesto por si acaso.
+
+### 1. La detección de carga: el arnés está hecho, falta el material
 
 Juan Diego entrenó un detector de segmentación con `package-seg` (2.197 imágenes de
 cajas de almacén, 100 épocas, **mAP50 de 0,935 en máscaras**). Los pesos están en
@@ -138,30 +163,53 @@ caja detectada. La comprobación **no concluye nada**, porque lo que sostenía e
 organizador de plástico transparente y el dataset son cajas de cartón opacas: el 0%
 tiene dos causas indistinguibles. Está escrito como la medición falsa nº 5.
 
-**Hay una propuesta suya sobre la mesa, con prueba de concepto ya hecha:** afinar
-ese modelo con sus propios vídeos, etiquetándolos **con SAM guiado por el
-esqueleto** —punto positivo entre las manos, puntos negativos en el cuerpo— en vez
-de a mano. Comprobado el 30/09 y funciona: la máscara cae sobre la caja y no sobre
-la persona. El flujo acordado:
+La salida era afinar ese modelo con sus propios vídeos, pre-etiquetando **con SAM
+guiado por el esqueleto** en vez de a mano. **El flujo está montado entero**, y las
+decisiones con lo que se descartó están en el
+[ADR 0002](docs/adr/0002-afinar-el-detector-de-carga-con-el-material-del-cliente.md):
 
-  1. extraer fotogramas variados de sus cuatro vídeos;
-  2. SAM pre-etiqueta;
-  3. **Juan Diego valida** en una hoja de contactos, descartando las malas;
-  4. afinar el modelo de `package-seg` con las buenas.
+| guion | qué hace |
+|---|---|
+| `scripts/record_loads.py` | graba la cámara en crudo, sin pasar por el navegador |
+| `scripts/extract_load_frames.py` | saca los fotogramas con persona y muñecas a la vista |
+| `scripts/prelabel_sam.py` | SAM propone, los filtros descartan, y sale `revision.html` |
+| `scripts/finetune_load.py` | partición por vídeo, mezcla con las de fábrica, mide antes y después |
 
-**El límite que hay que decir al hacerlo**: sus vídeos tienen una caja, una
-habitación, una persona y una luz. Entrenar solo con eso aprendería *esa* caja. Por
-eso se AFINA el modelo base en vez de sustituirlo — y eso resulta ser lo que haría
-un producto real: el modelo viene de fábrica y se calibra en cada planta con las
-cargas de ese cliente.
+#### Lo que apareció al mirar el material antes de construir nada encima
+
+**Los cuatro vídeos de la webcam son capturas de pantalla del panel**, con el
+esqueleto PINTADO encima de la persona y de la carga. Afinar con eso enseñaría al
+modelo a buscar líneas de colores, y **no se habría notado**, porque la validación
+lleva las mismas líneas. Es la medición falsa nº 6.
+
+Por eso `extract_load_frames.py` exige `--fuente` y `finetune_load.py` **se niega** a
+entrenar con material de pantalla: la garantía vive en el código, no en un aviso.
+
+Y lo que el ensayo sobre ese material deja medido, que orienta sin ser una tasa:
+
+| | |
+|---|---|
+| fotogramas candidatos de los 4 vídeos | 630 |
+| propuestas que pasan los filtros | **81** |
+| veces que SAM devolvió la silueta de la persona | **335 de 630**, con hasta 7 puntos negativos encima |
+
+Ese último número es el que justifica que los filtros existan: **los puntos negativos
+son una sugerencia, no una garantía.** Lo que garantiza es `judge_mask`, y encima de
+él, una persona mirando.
 
 ### 2. Lo que falta para el vídeo de LinkedIn
 
-  · **El README del repositorio, que no existe.** Es lo primero que ve un
-    reclutador y lo que decide si sigue mirando. Tiene que abrir con el problema y
-    su coste, no con la arquitectura.
+  · ~~**El README del repositorio.**~~ HECHO el 2026-10-02. Abre con el problema y su
+    coste, lleva el replay en esqueleto como portada —que *es* el argumento de
+    privacidad— y una sección de lo que el sistema NO hace. **Falta una cosa tuya**:
+    enlazar una por una las cifras de incidencia y coste (Sistema General de Riesgos
+    Laborales, Fasecolda). Están marcadas en el propio README como pendientes y
+    citadas como orden de magnitud mientras tanto.
   · **Grabar con la cámara de lado.** Es la única vista desde la que REBA se puede
-    medir, y ahora el sistema avisa cuando no lo está.
+    medir, y ahora el sistema avisa cuando no lo está. **Sale gratis con los vídeos de
+    la carga** si los grabas de lado, que es lo que pide el guion de arriba.
+  · **El nombre del repositorio**, que sigue sin decidirse y es tuyo: `pose_stimation`
+    describe la técnica en vez del problema, y lleva una errata.
 
 ### 3. Lo apuntado y no hecho
 

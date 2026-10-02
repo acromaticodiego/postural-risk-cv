@@ -208,6 +208,59 @@ a la espera de una grabación con una caja de cartón de verdad.
 
 ---
 
+## 6. La prueba de concepto funcionó, y el material sobre el que funcionó no servía (2026-10-02)
+
+**Qué se creía.** Que el flujo para afinar el detector de carga estaba listo para
+montarse. La prueba de concepto estaba hecha y era correcta: SAM guiado por el
+esqueleto —un punto positivo entre las manos, varios negativos en el cuerpo— segmenta
+la caja y no a la persona, y está la imagen que lo demuestra
+(`artifacts/samneg-1.png`). El plan acordado era extraer fotogramas de los cuatro
+vídeos de la webcam, dejar que SAM pre-etiquetara, validar a mano y afinar.
+
+**Qué pasaba.** Los cuatro vídeos **no son grabaciones de la cámara: son capturas de
+pantalla del panel**. La imagen de la cámara ocupa un recuadro del navegador, se
+vuelve a comprimir al grabar la pantalla, y —esto es lo que lo inhabilita— **lleva el
+esqueleto pintado encima de la persona y de la carga**.
+
+Un detector de segmentación afinado con eso aprendería a buscar líneas de colores. Y
+lo que lo hace peligroso es que **no se habría notado**: la validación lleva las
+mismas líneas pintadas, así que el mAP habría salido estupendo. El número habría sido
+reproducible, el entrenamiento correcto y la conclusión —«el afinado funciona»—
+falsa.
+
+Medido sobre el recuadro de la cámara recortado a su resolución nativa, 687×441:
+
+| | |
+|---|---|
+| confianza de YOLO-pose sobre la persona | **0,13** (`postura prueva 3`, al 55% del vídeo) |
+| fotogramas examinados sin encontrar a nadie | **148 de 317** en ese vídeo |
+
+**Qué sobrevive, que es casi todo.** La prueba de concepto demostraba que *el método*
+funciona —puntos del esqueleto como aviso para SAM— y eso sigue en pie: sobre esas
+mismas capturas, el flujo completo produce 81 propuestas válidas de 630 fotogramas, y
+las buenas son buenas. Lo que no se sostiene es el salto implícito de «el método
+funciona sobre estos fotogramas» a «estos fotogramas son el material de
+entrenamiento», que nadie llegó a escribir y que estaba en el plan igualmente.
+
+**Cómo se destapó.** Mirando el primer fotograma antes de escribir una línea de
+código, por la regla que dejó la medición falsa nº 5. Y lo que apareció no fue lo que
+se buscaba —se iba a comprobar qué objeto sostenía la persona— sino que la imagen
+entera era un navegador.
+
+**La lección, y es la segunda vez seguida que la detección de carga tropieza con lo
+mismo:** en la nº 5 el problema era que el objeto del vídeo no era una caja de cartón,
+y aquí que el vídeo no era un vídeo de una cámara. **Las dos veces el código estaba
+bien y el material no, y las dos veces lo destapó mirar la imagen.** Cuando una
+comprobación depende de material grabado, la primera pregunta no es si el código es
+correcto sino **qué es exactamente lo que hay en esos píxeles**, y eso no se responde
+leyendo el nombre del fichero.
+
+El arreglo no es un aviso en la documentación: `extract_load_frames.py` exige declarar
+la procedencia y `finetune_load.py` **se niega** a entrenar con material de pantalla.
+Un aviso se lee una vez y se desobedece a la tercera sesión.
+
+---
+
 ## Sustos que se comprobaron y NO eran falsos
 
 No todo lo sospechoso está mal, y anotar las falsas alarmas evita desconfiar de
