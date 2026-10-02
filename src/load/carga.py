@@ -39,7 +39,24 @@ MAX_HAND_DISTANCE_BODIES = 0.35
 
 # Confianza mínima del detector. Una caja dudosa que entra cambia el peso aplicado a
 # un levantamiento y con él el índice de riesgo, así que más vale no verla.
-MIN_CONFIDENCE = 0.45
+#
+# CALIBRADO el 2026-10-02 contra el modelo de la planta, con el criterio que el ADR
+# 0001 ya tenía escrito —el sistema se inclina a no dar falsas alarmas—: **el umbral
+# más bajo que no deja pasar ni un falso positivo**. El conjunto negativo es un vídeo
+# del mismo sitio y la misma persona sosteniendo OTRO objeto, donde cualquier caja
+# asociada a las manos es un error por construcción.
+#
+#   umbral   aciertos (67 con caja)   falsos (97 sin caja)
+#    0,25           57                      10
+#    0,45           52                       3
+#    0,50           50                       0     <- elegido
+#    0,60           46                       0
+#    0,80           25                       0
+#
+# Subir por encima de 0,50 cuesta detecciones y no compra nada, porque los falsos ya
+# son cero. Y con n=1 vídeo por lado, un objeto y una habitación, esto calibra ESTE
+# despliegue; no es una tasa publicable.
+MIN_CONFIDENCE = 0.50
 
 
 @dataclass(frozen=True)

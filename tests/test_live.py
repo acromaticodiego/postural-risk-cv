@@ -118,6 +118,70 @@ def test_a_sustained_risk_closes_an_event_and_a_brief_one_does_not() -> None:
     assert evento.dominant_component
 
 
+def test_one_flickering_frame_does_not_reset_the_event() -> None:
+    """El fallo por el que un video de alguien levantando cajas cerraba CERO eventos.
+
+    No era que no viera el riesgo: 65 de 128 fotogramas pasaban del umbral. El
+    puntaje parpadea entre 3 y 4 —"6 4 4 4 3 4 4 3 4 4 3..."— y un solo fotograma por
+    debajo reiniciaba la racha, asi que la mas larga duraba 0,9 s contra el 1,0 s que
+    se exige. Fallaba por un fotograma.
+
+    Aqui se reproduce exacto: riesgo sostenido, UN fotograma seguro en medio, y mas
+    riesgo. Tiene que salir UN evento, no ninguno y no dos.
+    """
+    s = _sesion(load_kg=18, coupling="poor")
+    sujeto = load(1)
+    puntos = sujeto.keypoints[sujeto.evaluable]
+
+    peligrosa = None
+    for p in puntos:
+        if s.step(feed=(p, _caja(p)))["reba"] >= s.config.risk_threshold:
+            peligrosa = p
+            break
+    assert peligrosa is not None
+    segura = min(puntos, key=lambda p: s.step(feed=(p, _caja(p)))["reba"])
+    assert s.step(feed=(segura, _caja(segura)))["reba"] < s.config.risk_threshold
+
+    antes = len(s.events)
+    for _ in range(6):
+        s.step(feed=(peligrosa, _caja(peligrosa)))
+    s.step(feed=(segura, _caja(segura)))          # el parpadeo
+    for _ in range(6):
+        s.step(feed=(peligrosa, _caja(peligrosa)))
+    assert len(s.events) == antes, "un fotograma suelto no puede cerrar el tramo"
+
+    for _ in range(4):                             # ahora si se baja de verdad
+        s.step(feed=(segura, _caja(segura)))
+    assert len(s.events) == antes + 1, "tenia que cerrarse UN evento"
+    assert s.events[-1].duration_seconds >= 1.0
+
+
+def test_a_real_pause_still_closes_the_event() -> None:
+    """La tolerancia no puede tragarse una pausa de verdad: si no, dos levantamientos
+    separados se publicarian como uno solo y su duracion seria falsa."""
+    s = _sesion(load_kg=18, coupling="poor")
+    sujeto = load(1)
+    puntos = sujeto.keypoints[sujeto.evaluable]
+    peligrosa = next(
+        (p for p in puntos if s.step(feed=(p, _caja(p)))["reba"] >= s.config.risk_threshold),
+        None,
+    )
+    assert peligrosa is not None
+    segura = min(puntos, key=lambda p: s.step(feed=(p, _caja(p)))["reba"])
+
+    antes = len(s.events)
+    for _ in range(12):
+        s.step(feed=(peligrosa, _caja(peligrosa)))
+    for _ in range(10):                            # un segundo entero sin riesgo
+        s.step(feed=(segura, _caja(segura)))
+    assert len(s.events) == antes + 1
+    for _ in range(12):
+        s.step(feed=(peligrosa, _caja(peligrosa)))
+    for _ in range(10):
+        s.step(feed=(segura, _caja(segura)))
+    assert len(s.events) == antes + 2, "dos tramos separados son dos eventos"
+
+
 def test_skeleton_sent_to_the_browser_is_in_canvas_range() -> None:
     s = _sesion()
     sujeto = load(1)

@@ -50,20 +50,25 @@ Las cifras con su procedencia están en `GUIA.md`.
 
 ## ESTADO
 
-Fase 0. Entorno verificado contra la GPU, esperando el dataset.
+**El estado real vive en `GUIA.md`, en la sección «DÓNDE ESTAMOS». Este resumen se
+queda viejo; aquel se actualiza cada sesión** — de hecho este decía «Fase 0,
+esperando el dataset» con el proyecto entero funcionando.
 
-| pieza | estado |
-|---|---|
-| venv, torch 2.11.0+cu128, ultralytics 8.3.253 | verificado en la RTX 3050 |
-| YOLO-pose de humo: 4 personas, keypoints `(4,17,3)` | verificado |
-| extractor de keypoints | pendiente |
-| REBA geométrico (línea base) | pendiente |
-| arnés de evaluación | pendiente |
+Al 2026-10-02: el sistema va de punta a punta —pose, REBA, NIOSH, el TCN de tareas,
+el informe por tareas y el panel con modo en vivo—, **126 pruebas en verde**, y el
+README existe. Lo único bloqueado es el afinado del detector de carga, que espera a
+que Juan Diego grabe vídeo con la cámara en crudo (`scripts/record_loads.py`).
 
-**Levantar el entorno:**
+**Levantar el panel:**
 ```powershell
 Set-Location C:\Users\ASUS\Desktop\pose_stimation
-.\.venv\Scripts\python.exe -c "import torch; print(torch.cuda.is_available())"
+.\.venv\Scripts\python.exe -m uvicorn src.api.server:app --port 8010
+# el 8000 lo ocupa el agente de voz
+```
+
+**Las pruebas:**
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
 ---

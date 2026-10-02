@@ -46,7 +46,16 @@ RAIZ = Path(__file__).resolve().parents[2]
 MODELO = RAIZ / "artifacts/modelo"
 
 TARGET_HZ = 10.0
-PREVIEW_WIDTH = 480
+# Ancho al que viaja la imagen de la camara. 480 bastaba cuando el panel era un
+# recuadro; con la consola ocupando la pantalla, el navegador la estaba AMPLIANDO y
+# se veia blanda. Medido sobre fotogramas reales: a 720 px el redimensionado mas el
+# JPEG cuestan 7,4 ms y 387 KB/s a 10 Hz, dentro de un ciclo que usa 34 de 100 ms.
+PREVIEW_WIDTH = 720
+
+# Cuantas medidas de escala se guardan para quedarse con la mayor. A 10 Hz y una
+# busqueda de carga cada 3 fotogramas, 20 son unos 6 segundos: lo que tarda un
+# levantamiento completo, y poco para que alguien cambie de distancia a la camara.
+ESCALA_VENTANA = 20
 
 # Cada cuántos fotogramas se busca la carga. Dos modelos en la ruta crítica no caben
 # en 100 ms: la pose sola cuesta ~74 ms en una RTX 3050 y el detector de carga añade
@@ -55,6 +64,37 @@ PREVIEW_WIDTH = 480
 # medias se conserva la última. Bajar la tasa de la pose en su lugar sería peor:
 # rompería la ventana de 2 s con la que se entrenó el modelo de tareas.
 LOAD_EVERY = 3
+
+# Cuantos fotogramas seguidos por debajo del umbral se toleran DENTRO de una racha
+# antes de darla por terminada.
+#
+# Sin esto el sistema no cerraba ni un evento en un video de alguien levantando
+# cajas, y no por no ver el riesgo: 65 de 128 fotogramas pasaban de REBA 4. El
+# puntaje parpadea entre 3 y 4 —"6 4 4 4 3 4 4 3 4 4 3 6 3 4..."— y un solo
+# fotograma en 3 reiniciaba la racha entera, asi que la mas larga duraba 0,9 s
+# contra el 1,0 s que pide la norma de este sistema. Fallaba por un fotograma.
+#
+# Medido sobre esa serie: con 0 de tolerancia salen 0 eventos, con 1 sale 1, y con 2
+# salen 2. Se eligen 2 (0,2 s) porque un fotograma suelto por debajo es temblor del
+# detector de pose, no que la persona se haya erguido y vuelto a agachar en una
+# decima. Pasar de ahi empieza a fundir levantamientos distintos en uno.
+#
+# El tiempo tolerado SI cuenta en la duracion del evento, porque la postura de
+# riesgo no se interrumpio de verdad: lo que fallo fue la medida.
+EVENT_GAP_FRAMES = 2
+
+# Cuantas medidas de anchura se guardan para quedarse con la mayor plausible.
+#
+# La camara no mide la caja: mide su PROYECCION, y eso solo coincide con la anchura
+# real cuando la cara de la caja esta paralela al plano de la imagen. Medido sobre 67
+# fotogramas de una grabacion real, el mismo objeto se proyecta entre 96 y 231
+# pixeles segun como este girado — 2,4x— y el panel llegaba a publicar "25 cm" de una
+# caja que pasa de 40, lo cual era CIERTO como proyeccion y falso como anchura.
+#
+# La proyeccion mas ancha de una caja es su anchura real, asi que de la ventana se
+# toma el percentil 90 y no el maximo: con el maximo, una sola deteccion demasiado
+# grande se queda mandando los seis segundos siguientes.
+ANCHO_VENTANA = 20
 
 
 @dataclass
@@ -110,6 +150,7 @@ class LiveSession:
         # alguien plantado frente al portátil.
         self.pose = None
         self.capture = None
+        self._descartar = 0
         if camera is not None:
             from ultralytics import YOLO
 
@@ -117,6 +158,15 @@ class LiveSession:
             self.capture = cv2.VideoCapture(camera)
             if not self.capture.isOpened():
                 raise RuntimeError(f"no se pudo abrir la cámara {camera}")
+            # El ciclo consume 10 fotogramas por segundo y la cámara produce 30: los
+            # otros 20 se quedan en el búfer del driver, que es una COLA. A los diez
+            # segundos se van doscientos fotogramas de retraso y lo que se ve en
+            # pantalla es lo que pasó hace siete segundos. No es lentitud de cómputo
+            # —el ciclo mide 34 ms de 100 disponibles— sino latencia acumulada, y se
+            # nota exactamente igual.
+            self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            fps_camara = self.capture.get(cv2.CAP_PROP_FPS) or 30.0
+            self._descartar = max(0, int(round(fps_camara / TARGET_HZ)) - 1)
 
         self.buffer: deque[np.ndarray] = deque(maxlen=self.window_frames)
         self.started = time.perf_counter()
@@ -124,17 +174,33 @@ class LiveSession:
         self.seconds_by_level: dict[str, float] = {}
         self.events: list[LiveEvent] = []
         self._streak: list[tuple[int, str]] = []
+        self._streak_gap = 0
         self._streak_poses: list[np.ndarray] = []
         self._streak_tasks: list[str] = []
         self._streak_loads: list[np.ndarray | None] = []
 
         # El detector de carga es opcional: sin él, el sistema funciona igual y
         # NIOSH mide a las muñecas en vez de al centro de la caja.
+        #
+        # Y si no se dice cuál, gana el de la planta sobre el de fábrica. Ese orden ES
+        # la decisión de producto del ADR 0002 escrita en una línea de código: el
+        # modelo viene de fábrica y cada cliente lo calibra con sus cargas, así que en
+        # cuanto existe un modelo calibrado para esta planta, es el que manda.
+        if load_weights is None:
+            for candidato in (model_dir / "carga-cliente.pt", model_dir / "carga.pt"):
+                if candidato.exists():
+                    load_weights = candidato
+                    break
+
         self.load_detector = None
+        self.load_weights: Path | None = None
         if load_weights and Path(load_weights).exists():
             from ..load.carga import LoadDetector
 
             self.load_detector = LoadDetector(str(load_weights), device=self.device)
+            self.load_weights = Path(load_weights)
+        self._escalas: list[float] = []
+        self._anchos: list[float] = []
         self._last_load = None
         self._streak_start = 0.0
         self._last_task = "—"
@@ -142,7 +208,19 @@ class LiveSession:
     # --- ciclo -------------------------------------------------------------
 
     def read(self):
-        """Un fotograma: (imagen, keypoints, caja, confianzas) o todo None."""
+        """Un fotograma: (imagen, keypoints, caja, confianzas) o todo None.
+
+        Se descartan los fotogramas que la cámara ha producido mientras se procesaba
+        el anterior. `grab()` los saca de la cola sin decodificarlos, que cuesta una
+        fracción de lo que cuesta `read()`; sin esto la imagen va acumulando retraso
+        indefinidamente y el sistema parece lento cuando lo que está es desfasado.
+
+        Y se descartan en vez de procesarlos porque la tasa de 10 Hz es parte del
+        contrato del modelo: la ventana de 2 s con la que se entrenó son 20 fotogramas
+        y alimentarlo más deprisa le daría el gesto acelerado.
+        """
+        for _ in range(self._descartar):
+            self.capture.grab()
         ok, frame = self.capture.read()
         if not ok:
             return None, None, None, None
@@ -208,18 +286,24 @@ class LiveSession:
     def step(
         self,
         want_preview: bool = True,
-        feed: tuple[np.ndarray | None, np.ndarray | None] | None = None,
+        feed: tuple | None = None,
     ) -> dict | None:
         """Procesa un fotograma y devuelve lo que se pinta en pantalla.
 
-        `feed` permite inyectar (keypoints, caja) en vez de leer la cámara. Es lo
-        que usan las pruebas para ejercitar todo el camino de una persona presente
-        sin necesitar a nadie delante del portátil.
+        `feed` permite inyectar (keypoints, caja) —y opcionalmente la imagen— en vez
+        de leer la cámara. Es lo que usan las pruebas para ejercitar todo el camino de
+        una persona presente sin necesitar a nadie delante del portátil.
+
+        La imagen es opcional y no estaba al principio, y su ausencia dejaba fuera
+        justo el detector de carga: sin fotograma no hay nada que detectar, así que esa
+        mitad del modo en vivo solo se podía comprobar con una caja en las manos
+        delante de la webcam. Con ella, una grabación guardada recorre el mismo camino
+        que la cámara.
         """
         confianzas = None
         if feed is not None:
-            keypoints, caja = feed
-            frame = None
+            keypoints, caja = feed[0], feed[1]
+            frame = feed[2] if len(feed) > 2 else None
             want_preview = False
         else:
             frame, keypoints, caja, confianzas = self.read()
@@ -282,7 +366,7 @@ class LiveSession:
             "side": str(datos["side"][0]) if presente else None,
             "frontal_view": bool(datos["frontal_view"][0]) if presente else False,
             "technique": self._technique(datos) if presente else None,
-            "load": self._load_payload(),
+            "load": self._load_payload(caja) if presente else None,
             "skeleton": self._canvas_skeleton(keypoints, caja) if presente else None,
             "seconds_by_level": {k: round(v, 1) for k, v in self.seconds_by_level.items()},
             "events": [e.__dict__ for e in self.events[-8:]],
@@ -307,6 +391,30 @@ class LiveSession:
         centro = np.array([(caja[0] + caja[2]) / 2, (caja[1] + caja[3]) / 2])
         return np.round((keypoints - centro) / alto * 0.8 + 0.5, 4).tolist()
 
+    def _canvas_load(self, caja: np.ndarray) -> list | None:
+        """El contorno de la carga en 0..1, con la MISMA transformación que el esqueleto.
+
+        Tiene que ser la misma o la caja saldría desplazada respecto a las manos que la
+        sujetan, que es justo lo que esta vista existe para enseñar. Por eso se calcula
+        aquí, donde está la caja de la persona, y no dentro de `_load_payload`.
+
+        Y que la carga aparezca en la vista de esqueleto no es decorado: esa columna es
+        «lo único que sale del dispositivo». Si el sistema aplica el peso de una caja
+        que vio, la caja tiene que estar en lo que se conserva, o el replay de un
+        incidente no podría explicar de dónde salió ese peso.
+        """
+        if self._last_load is None:
+            return None
+        alto = max(float(caja[3] - caja[1]), 1.0)
+        centro = np.array([(caja[0] + caja[2]) / 2, (caja[1] + caja[3]) / 2])
+        contorno = self._last_load.polygon
+        if contorno:
+            puntos = np.asarray(contorno, dtype=np.float32)
+        else:
+            x0, y0, x1, y1 = self._last_load.box
+            puntos = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32)
+        return np.round((puntos - centro) / alto * 0.8 + 0.5, 4).tolist()
+
     def _preview(self, frame: np.ndarray, keypoints: np.ndarray | None) -> str:
         """La imagen de la cámara con el esqueleto encima, para la vista de montaje.
 
@@ -329,6 +437,28 @@ class LiveSession:
                 if (p == 0).all():
                     continue
                 cv2.circle(pequeno, tuple(p.astype(int)), 3, (120, 220, 90), -1, cv2.LINE_AA)
+        # La carga se dibuja DESPUES del esqueleto: al reves, la linea verde del
+        # cuerpo cruzaba por encima de la etiqueta y la dejaba a medias leer.
+        if self._last_load is not None:
+            contorno = self._last_load.polygon
+            if contorno:
+                puntos = (np.asarray(contorno, dtype=np.float32) * escala).astype(int)
+                cv2.polylines(pequeno, [puntos], True, (60, 180, 255), 2, cv2.LINE_AA)
+            else:
+                x0, y0, x1, y1 = (int(v * escala) for v in self._last_load.box)
+                cv2.rectangle(pequeno, (x0, y0), (x1, y1), (60, 180, 255), 2)
+            # La etiqueta con la confianza, no solo el contorno. Un contorno sin
+            # nombre obliga a quien mira la demo a adivinar si el sistema sabe QUÉ ha
+            # visto o solo que hay algo ahí; y la confianza al lado es lo que hace
+            # creíble el umbral de 0,50 cuando alguien pregunte por él.
+            x0, y0 = (int(v * escala) for v in self._last_load.box[:2])
+            texto = f"caja {self._last_load.confidence:.2f}"
+            (ancho_t, alto_t), _ = cv2.getTextSize(texto, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+            y0 = max(y0, alto_t + 8)
+            cv2.rectangle(pequeno, (x0, y0 - alto_t - 7), (x0 + ancho_t + 8, y0 - 1), (60, 180, 255), -1)
+            cv2.putText(pequeno, texto, (x0 + 4, y0 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                        (20, 20, 20), 1, cv2.LINE_AA)
+
         ok, buffer = cv2.imencode(".jpg", pequeno, [cv2.IMWRITE_JPEG_QUALITY, 70])
         return base64.b64encode(buffer).decode("ascii") if ok else ""
 
@@ -350,14 +480,68 @@ class LiveSession:
             return
         px_cm = None
         if self.config.worker_height_cm:
-            px_cm = _pixels_per_cm(keypoints, self.config.worker_height_cm)
-        self._last_load = build_load(
+            px_cm = self._escala(keypoints)
+        carga = build_load(
             cajas[indice],
             float(confianzas[indice]),
             px_cm,
             tuple(self.config.load_catalog) or None,
             poligonos[indice] if indice < len(poligonos) else None,
         )
+        self._last_load = self._ancho_estable(carga, px_cm)
+
+    def _ancho_estable(self, carga, px_cm: float | None):
+        """Sustituye la anchura del fotograma por la mayor vista hace poco.
+
+        La camara mide la proyeccion de la caja, no la caja: girada de canto se
+        proyecta menos de la mitad. Como la proyeccion mas ancha es la anchura real,
+        de la ventana reciente se toma el percentil 90 — el maximo dejaria que una
+        sola deteccion pasada de grande mandara durante seis segundos.
+
+        Y al cambiar la anchura hay que volver a emparejar con el catalogo, porque el
+        peso que se aplica al levantamiento sale de ahi. Hacerlo a medias —anchura
+        nueva, catalogo viejo— daria un peso que no corresponde a ninguna medida.
+        """
+        if carga.width_cm is None or px_cm is None:
+            return carga
+        self._anchos.append(carga.width_cm)
+        if len(self._anchos) > ANCHO_VENTANA:
+            self._anchos.pop(0)
+        estable = round(float(np.percentile(self._anchos, 90)), 1)
+        if estable <= carga.width_cm:
+            return carga
+        from ..load.carga import DetectedLoad, match_catalog
+
+        catalogo = tuple(self.config.load_catalog) or None
+        return DetectedLoad(
+            box=carga.box,
+            center=carga.center,
+            confidence=carga.confidence,
+            width_cm=estable,
+            height_cm=carga.height_cm,
+            matched=match_catalog(estable, catalogo),
+            polygon=carga.polygon,
+        )
+
+    def _escala(self, keypoints: np.ndarray) -> float:
+        """Píxeles por centímetro, tomados de lo más erguido que se le haya visto hace poco.
+
+        La escala sale de medir de la coronilla al tobillo, y ese tramo **se encoge al
+        agacharse**: la persona mide lo mismo y su proyección no. Medido sobre una
+        grabación real (2026-10-02, 67 fotogramas), va de 2,16 a 4,41 px/cm en el mismo
+        vídeo, así que una caja medida agachado sale 1,5× más grande — y el momento en
+        que alguien levanta una caja es justo el momento en que está agachado.
+
+        Por eso se guarda el máximo de una VENTANA de unos segundos y no de la sesión
+        entera: dentro de unos segundos la persona no ha cambiado de distancia a la
+        cámara, y a lo largo de un turno sí — y entonces el máximo histórico sería la
+        escala de cuando pasó más cerca, que es otro error con el mismo disfraz.
+        """
+        actual = _pixels_per_cm(keypoints, self.config.worker_height_cm)
+        self._escalas.append(actual)
+        if len(self._escalas) > ESCALA_VENTANA:
+            self._escalas.pop(0)
+        return max(self._escalas)
 
     def _technique(self, datos) -> dict:
         """El consejo de técnica: qué hacer distinto, o que ya está bien hecho.
@@ -375,11 +559,12 @@ class LiveSession:
         v = VERDICTS[codigo]
         return {"code": v.code, "message": v.message, "avoidable": v.avoidable}
 
-    def _load_payload(self) -> dict | None:
+    def _load_payload(self, caja: np.ndarray) -> dict | None:
         if self._last_load is None:
             return None
         c = self._last_load
         return {
+            "canvas": self._canvas_load(caja),
             "box": c.box,
             "center": c.center,
             "confidence": c.confidence,
@@ -412,6 +597,16 @@ class LiveSession:
                 self._streak_tasks = []
                 self._streak_loads = []
             peor = max(componentes, key=componentes.get) if componentes else "trunk"
+            # Los fotogramas tolerados se reincorporan a la racha con el ultimo valor
+            # conocido: su riesgo no fue menor, fue mal medido, y descontarlos de la
+            # duracion haria que un evento de 1,2 s se publicara como de 1,0.
+            if self._streak_gap and self._streak:
+                self._streak.extend([self._streak[-1]] * self._streak_gap)
+                self._streak_tasks.extend([self._streak_tasks[-1]] * self._streak_gap)
+                self._streak_loads.extend([self._streak_loads[-1]] * self._streak_gap)
+                if self._streak_poses:
+                    self._streak_poses.extend([self._streak_poses[-1]] * self._streak_gap)
+            self._streak_gap = 0
             self._streak.append((reba, peor))
             if keypoints is not None:
                 self._streak_poses.append(keypoints)
@@ -421,6 +616,11 @@ class LiveSession:
             )
             return
         if self._streak:
+            # Un fotograma por debajo no cierra el tramo: se espera a ver si vuelve.
+            if self._streak_gap < EVENT_GAP_FRAMES:
+                self._streak_gap += 1
+                return
+            self._streak_gap = 0
             duracion = len(self._streak) / TARGET_HZ
             if duracion >= self.config.min_event_seconds:
                 picos = [r for r, _ in self._streak]
@@ -474,6 +674,7 @@ class LiveSession:
                     )
                 )
             self._streak = []
+            self._streak_gap = 0
             self._streak_poses = []
             self._streak_tasks = []
             self._streak_loads = []
