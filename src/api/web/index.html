@@ -142,6 +142,71 @@ input[type=range]{flex:1;accent-color:var(--acento)}
   padding:6px 14px}
 .ajustes-vivo button:hover{border-color:var(--acento)}
 .ajustes-vivo .nota{font-size:11.5px;color:var(--tenue)}
+/* --- La consola en vivo -------------------------------------------------
+   No es una pagina con secciones, es un PUESTO DE VIGILANCIA: lo que un
+   coordinador deja abierto en una pantalla. De ahi las tres reglas:
+   la ventana no se mueve, las dos vistas de video NUNCA se salen de cuadro
+   —son la comparacion que el sistema existe para ensenar— y lo que crece sin
+   parar (eventos) scrollea dentro de su propia columna. */
+body.consola-activa{overflow:hidden}
+body.consola-activa main{max-width:none;margin:0;padding:0;
+  height:calc(100vh - 61px);display:flex;flex-direction:column}
+body.consola-activa .migas{padding:8px 20px 0;margin:0;min-height:0}
+/* `#vista` es quien cuelga de `main`, asi que el `flex:1` tiene que llegarle a el:
+   ponerselo solo a `.consola` dejaba la consola con su alto natural y medio
+   ventana en negro debajo. */
+body.consola-activa #vista{flex:1;min-height:0;display:flex;flex-direction:column}
+
+.consola{flex:1;min-height:0;display:grid;
+  grid-template-columns:270px minmax(0,1fr) 330px;gap:14px;padding:12px 20px 18px}
+.consola > *{min-height:0}
+
+.rail{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+  padding:16px 18px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.rail::-webkit-scrollbar,.lateral::-webkit-scrollbar{width:8px}
+.rail::-webkit-scrollbar-thumb,.lateral::-webkit-scrollbar-thumb{
+  background:var(--borde);border-radius:4px}
+
+.marcador-grande{display:flex;align-items:baseline;gap:12px;
+  padding-bottom:12px;border-bottom:1px solid var(--borde);margin-bottom:14px}
+.marcador-grande .cifra{font-size:76px;font-weight:600;line-height:.9;
+  font-variant-numeric:tabular-nums}
+.marcador-grande .texto{display:flex;flex-direction:column}
+.marcador-grande .nivel{font-size:13px;letter-spacing:1.4px;text-transform:uppercase;
+  font-weight:600}
+.marcador-grande .umbral{font-size:11px;color:var(--tenue)}
+
+.escenario{display:grid;grid-template-rows:1fr;min-height:0}
+.par-vistas{display:grid;grid-template-columns:1fr 1fr;gap:14px;min-height:0}
+.par-vistas .caja-vista{display:flex;flex-direction:column;min-height:0;padding:12px}
+.par-vistas .caja-vista .lienzo-envoltura{flex:1;min-height:0;display:flex;
+  align-items:center;justify-content:center;background:#000;border-radius:6px;
+  overflow:hidden;margin:8px 0}
+.par-vistas img,.par-vistas canvas{max-width:100%;max-height:100%;
+  width:auto;height:auto;object-fit:contain}
+.par-vistas .nota{font-size:10.5px;line-height:1.45;min-height:0}
+/* El sello va posicionado sobre la esquina, asi que el titulo tiene que dejarle
+   sitio o se pisan en cuanto la columna se estrecha. A 1366 ya pasaba. */
+.par-vistas .caja-vista h3{padding-right:96px;margin-bottom:0;line-height:1.3}
+.par-vistas .sello{top:12px;right:12px}
+
+.lateral{overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-right:2px}
+.bloque{background:var(--panel);border:1px solid var(--borde);border-radius:10px;
+  padding:14px 16px}
+.bloque > .etiqueta{margin-bottom:8px}
+
+.barra-puesto{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:8px 20px;border-bottom:1px solid var(--borde);background:var(--panel)}
+.barra-puesto label{font-size:12px;color:var(--suave)}
+.barra-puesto input,.barra-puesto select{font:inherit;font-size:12.5px;color:var(--texto);
+  background:var(--panel2);border:1px solid var(--borde);border-radius:6px;
+  padding:4px 7px;width:70px;margin:0 3px}
+.barra-puesto select{width:auto}
+.barra-puesto button{background:var(--panel2);border:1px solid var(--borde);
+  border-radius:6px;padding:5px 13px;font-size:12.5px}
+.barra-puesto button:hover{border-color:var(--acento)}
+.barra-puesto .nota{font-size:11px;color:var(--tenue);margin-left:auto}
+.barra-puesto .estado{font-size:12px;color:var(--suave)}
 .etiqueta{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--tenue)}
 </style>
 </head>
@@ -175,6 +240,9 @@ const el = (t, p={}) => Object.assign(document.createElement(t), p);
 function ir(vista, ...args){
   if (animacion) { cancelAnimationFrame(animacion); animacion = null; }
   cerrarSocket();   // salir del modo en vivo suelta la camara
+  // La consola fija su alto a la ventana; el resto de pantallas scrollean como
+  // cualquier pagina, asi que la clase se quita al salir o se quedarian cortadas.
+  document.body.classList.remove("consola-activa");
   const migas = document.getElementById("migas");
   migas.innerHTML = "";
   if (vista !== "inicio") {
@@ -458,74 +526,91 @@ function vistaEnVivo(){
 
   const v = document.getElementById("vista");
   v.innerHTML = "";
-  v.append(el("div",{className:"titulo",innerHTML:"<h2>Cámara en vivo</h2>"}),
-           el("div",{className:"sub",id:"estado-vivo",textContent:"Conectando con la cámara…"}));
+  document.body.classList.add("consola-activa");
 
-  const dos = el("div",{className:"dos-vistas"});
-  // Lo que la camara NO puede ver se declara, no se adivina (ADR 0001). Hasta hoy
-  // el modo en vivo se conectaba sin un solo parametro, asi que el puesto salia
-  // "sin configurar" y la caja detectada no tenia escala con la que medirse: se
-  // dibujaba el contorno y no se podia decir cuanto media ni cuanto pesaba.
-  const ajustes = el("div",{className:"ajustes-vivo"});
+  // La barra del puesto va pegada arriba y es fina: se toca una vez al empezar y
+  // despues solo estorba. Lo que la camara NO puede ver se declara, no se adivina
+  // (ADR 0001): sin estatura la caja detectada no tiene con que medirse.
+  const ajustes = el("div",{className:"barra-puesto"});
   ajustes.innerHTML = `
     <label>Estatura <input id="v-altura" type="number" value="172" min="120" max="220"> cm</label>
-    <label>Peso de la carga <input id="v-peso" type="number" value="12" min="0" max="50" step="0.5"> kg</label>
+    <label>Carga <input id="v-peso" type="number" value="12" min="0" max="50" step="0.5"> kg</label>
     <label>Agarre <select id="v-agarre">
       <option value="good">bueno</option>
       <option value="fair" selected>regular</option>
       <option value="poor">malo</option>
       <option value="unacceptable">inaceptable</option>
     </select></label>
-    <button id="v-aplicar">Aplicar y reconectar</button>
-    <span class="nota">La camara no puede medir el peso ni el agarre: los declara quien conoce el puesto.</span>`;
+    <button id="v-aplicar">Aplicar</button>
+    <span class="estado" id="estado-vivo">Conectando con la cámara…</span>
+    <span class="nota">El peso y el agarre los declara quien conoce el puesto.</span>`;
   v.append(ajustes);
+
+  const consola = el("div",{className:"consola"});
+
+  // --- columna 1: el marcador. Es lo que decide el sistema, y por eso es lo
+  // primero que se lee: en el video de demostracion el REBA tiene que verse a la
+  // vez que el cuerpo que lo produce.
+  const rail = el("div",{className:"rail"});
+  const marcador = el("div",{className:"marcador-grande"});
+  const puntaje = el("div",{className:"cifra",textContent:"—"});
+  const textoNivel = el("div",{className:"texto"});
+  const nivel = el("div",{className:"nivel",textContent:"—"});
+  const umbral = el("div",{className:"umbral",id:"v-umbral",textContent:""});
+  textoNivel.append(nivel, umbral);
+  marcador.append(puntaje, textoNivel);
+
+  const tarea = el("div",{className:"tarea-viva",textContent:"—"});
+  const avisoTarea = el("div",{className:"aviso",style:"display:none;margin-top:6px"});
+  const avisoVista = el("div",{className:"aviso",style:"display:none;margin-top:6px"});
+  const carga = el("div",{className:"carga-viva",style:"display:none"});
+  const comps = el("div",{style:"margin-top:16px"});
+  rail.append(marcador,
+              el("div",{className:"etiqueta",textContent:"Tarea reconocida"}),
+              tarea, avisoTarea, avisoVista, carga,
+              el("div",{className:"etiqueta",style:"margin-top:16px",
+                        textContent:"Componentes REBA"}),
+              comps);
+
+  // --- columna 2: las dos vistas. Nunca se salen de cuadro, porque la
+  // comparacion entre lo que la camara capta y lo que el sistema conserva ES el
+  // argumento del producto.
+  const escenario = el("div",{className:"escenario"});
+  const dos = el("div",{className:"par-vistas"});
 
   const izq = el("div",{className:"caja-vista",innerHTML:
     `<h3>Lo que capta la cámara</h3><div class="sello efimero">efímero</div>`});
+  const envIzq = el("div",{className:"lienzo-envoltura"});
   const img = el("img");
-  izq.append(img, el("div",{className:"nota",textContent:
-    "Vista de instalación: sirve para encuadrar la cámara el día del montaje. Esta imagen no se escribe en disco ni sale del equipo."}));
+  envIzq.append(img);
+  izq.append(envIzq, el("div",{className:"nota",textContent:
+    "Vista de instalación, para encuadrar la cámara. No se escribe en disco ni sale del equipo."}));
 
   const der = el("div",{className:"caja-vista",innerHTML:
     `<h3>Lo único que sale del dispositivo</h3><div class="sello guardado">se conserva</div>`});
-  const lienzo = el("canvas",{width:480,height:360});
-  lienzo.style.width = "100%";
-  der.append(lienzo, el("div",{className:"nota",textContent:
+  const envDer = el("div",{className:"lienzo-envoltura"});
+  const lienzo = el("canvas",{width:640,height:480});
+  envDer.append(lienzo);
+  der.append(envDer, el("div",{className:"nota",textContent:
     "Articulaciones y puntajes. Con esto se reconstruye el incidente meses después, y no hay ninguna cara que proteger."}));
 
-  const tira = el("div",{className:"tira"});
-  const marcador = el("div");
-  const puntaje = el("div",{className:"grande"});
-  const nivel = el("div",{className:"nivel"});
-  marcador.append(puntaje, nivel);
-  const centro = el("div");
-  centro.append(el("div",{className:"etiqueta",textContent:"Tarea reconocida"}));
-  const tarea = el("div",{className:"tarea-viva",textContent:"—"});
-  const avisoTarea = el("div",{className:"aviso",style:"display:none"});
-  const avisoVista = el("div",{className:"aviso",style:"display:none;margin-left:8px"});
-  centro.append(avisoTarea, avisoVista);
-  const carga = el("div",{className:"carga-viva",style:"display:none"});
-  const comps = el("div",{style:"margin-top:14px;max-width:420px"});
-  centro.append(tarea, carga, comps);
-  tira.append(marcador, centro);
-  v.append(tira);
-
   dos.append(izq, der);
-  v.append(dos);
+  escenario.append(dos);
 
-
+  // --- columna 3: lo que crece. Es lo unico que scrollea.
+  const lateral = el("div",{className:"lateral"});
   const consejo = el("div",{className:"recomendacion",style:"display:none"});
-  v.append(consejo);
-
   const nioshVivo = el("div");
-  v.append(nioshVivo);
+  const cajaEventos = el("div",{className:"bloque"});
+  const listaEventos = el("div");
+  cajaEventos.append(el("div",{className:"etiqueta",textContent:"Eventos detectados"}),
+                     el("div",{className:"sub",id:"conteo-eventos",style:"margin:0 0 10px",
+                       textContent:"Ninguno todavía. Aparecen cuando una postura de riesgo se sostiene un segundo."}),
+                     listaEventos);
+  lateral.append(consejo, nioshVivo, cajaEventos);
 
-  const listaEventos = el("div",{style:"margin-top:22px"});
-  v.append(el("div",{className:"titulo",style:"margin-top:26px",
-             innerHTML:"<h2>Eventos detectados</h2>"}),
-           el("div",{className:"sub",id:"conteo-eventos",
-             textContent:"Ninguno todavía. Aparecen cuando una postura de riesgo se sostiene un segundo."}),
-           listaEventos);
+  consola.append(rail, escenario, lateral);
+  v.append(consola);
 
   const ctx = lienzo.getContext("2d");
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -544,8 +629,9 @@ function vistaEnVivo(){
       return;
     }
     document.getElementById("estado-vivo").textContent =
-      `${d.workstation} · umbral REBA ${d.threshold} · ${d.seconds.toFixed(0)} s procesados` +
+      `${d.seconds.toFixed(0)} s procesados` +
       (d.configured ? "" : " · puesto sin configurar: el riesgo real es mayor");
+    document.getElementById("v-umbral").textContent = `umbral de acción ${d.threshold}`;
 
     if (d.preview) img.src = "data:image/jpeg;base64," + d.preview;
 

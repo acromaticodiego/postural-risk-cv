@@ -79,6 +79,19 @@ LOAD_EVERY = 3
 # riesgo no se interrumpio de verdad: lo que fallo fue la medida.
 EVENT_GAP_FRAMES = 2
 
+# Cuantas medidas de anchura se guardan para quedarse con la mayor plausible.
+#
+# La camara no mide la caja: mide su PROYECCION, y eso solo coincide con la anchura
+# real cuando la cara de la caja esta paralela al plano de la imagen. Medido sobre 67
+# fotogramas de una grabacion real, el mismo objeto se proyecta entre 96 y 231
+# pixeles segun como este girado — 2,4x— y el panel llegaba a publicar "25 cm" de una
+# caja que pasa de 40, lo cual era CIERTO como proyeccion y falso como anchura.
+#
+# La proyeccion mas ancha de una caja es su anchura real, asi que de la ventana se
+# toma el percentil 90 y no el maximo: con el maximo, una sola deteccion demasiado
+# grande se queda mandando los seis segundos siguientes.
+ANCHO_VENTANA = 20
+
 
 @dataclass
 class LiveEvent:
@@ -183,6 +196,7 @@ class LiveSession:
             self.load_detector = LoadDetector(str(load_weights), device=self.device)
             self.load_weights = Path(load_weights)
         self._escalas: list[float] = []
+        self._anchos: list[float] = []
         self._last_load = None
         self._streak_start = 0.0
         self._last_task = "—"
@@ -463,12 +477,46 @@ class LiveSession:
         px_cm = None
         if self.config.worker_height_cm:
             px_cm = self._escala(keypoints)
-        self._last_load = build_load(
+        carga = build_load(
             cajas[indice],
             float(confianzas[indice]),
             px_cm,
             tuple(self.config.load_catalog) or None,
             poligonos[indice] if indice < len(poligonos) else None,
+        )
+        self._last_load = self._ancho_estable(carga, px_cm)
+
+    def _ancho_estable(self, carga, px_cm: float | None):
+        """Sustituye la anchura del fotograma por la mayor vista hace poco.
+
+        La camara mide la proyeccion de la caja, no la caja: girada de canto se
+        proyecta menos de la mitad. Como la proyeccion mas ancha es la anchura real,
+        de la ventana reciente se toma el percentil 90 — el maximo dejaria que una
+        sola deteccion pasada de grande mandara durante seis segundos.
+
+        Y al cambiar la anchura hay que volver a emparejar con el catalogo, porque el
+        peso que se aplica al levantamiento sale de ahi. Hacerlo a medias —anchura
+        nueva, catalogo viejo— daria un peso que no corresponde a ninguna medida.
+        """
+        if carga.width_cm is None or px_cm is None:
+            return carga
+        self._anchos.append(carga.width_cm)
+        if len(self._anchos) > ANCHO_VENTANA:
+            self._anchos.pop(0)
+        estable = round(float(np.percentile(self._anchos, 90)), 1)
+        if estable <= carga.width_cm:
+            return carga
+        from ..load.carga import DetectedLoad, match_catalog
+
+        catalogo = tuple(self.config.load_catalog) or None
+        return DetectedLoad(
+            box=carga.box,
+            center=carga.center,
+            confidence=carga.confidence,
+            width_cm=estable,
+            height_cm=carga.height_cm,
+            matched=match_catalog(estable, catalogo),
+            polygon=carga.polygon,
         )
 
     def _escala(self, keypoints: np.ndarray) -> float:
